@@ -1,0 +1,361 @@
+// ================================================================
+//  CrediConnect v3.0 — Express + PostgreSQL Server
+//  Deployable on Render.com (free tier)
+// ================================================================
+
+require('dotenv').config();
+const express = require('express');
+const { Pool } = require('pg');
+const bcrypt  = require('bcryptjs');
+const jwt     = require('jsonwebtoken');
+const cors    = require('cors');
+const path    = require('path');
+const { v4: uuidv4 } = require('uuid');
+
+const app         = express();
+const PORT        = process.env.PORT || 3000;
+const JWT_SECRET  = process.env.JWT_SECRET  || 'crediconnect-dev-secret-change-in-production';
+const JWT_EXPIRES = process.env.JWT_EXPIRES_IN || '8h';
+
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.static(path.join(__dirname, 'public')));
+
+// ── PostgreSQL Pool ──────────────────────────────────────────────
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+});
+
+pool.on('error', (err) => console.error('PostgreSQL pool error:', err.message));
+
+let dbConnected = false;
+(async () => {
+  try {
+    const client = await pool.connect();
+    await client.query('SELECT 1');
+    client.release();
+    dbConnected = true;
+    console.log('✅  PostgreSQL connected');
+  } catch (err) {
+    console.warn('⚠️  PostgreSQL connection failed:', err.message);
+  }
+})();
+
+// ── Middleware ───────────────────────────────────────────────────
+function requireDB(req, res, next) {
+  if (!dbConnected) return res.status(503).json({ error: 'Database not connected', offline: true });
+  next();
+}
+
+function requireAuth(req, res, next) {
+  const h = req.headers['authorization'];
+  if (!h?.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
+  try { req.user = jwt.verify(h.slice(7), JWT_SECRET); next(); }
+  catch (e) { res.status(401).json({ error: 'Token invalid or expired' }); }
+}
+
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!roles.includes(req.user?.role)) return res.status(403).json({ error: 'Insufficient permissions' });
+    next();
+  };
+}
+
+async function audit(userId, username, action, entity, entityId, detail) {
+  try {
+    await pool.query(
+      `INSERT INTO audit_log (user_id, username, action, entity, entity_id, detail)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [userId||null, username||null, action, entity||null, entityId||null, detail||null]
+    );
+  } catch (_) {}
+}
+
+// ── Row mappers ──────────────────────────────────────────────────
+const mapClient = r => ({ id:r.id, name:r.name, phone:r.phone, nationalId:r.national_id||'', email:r.email||'', address:r.address||'', occupation:r.occupation||'', dob:r.dob?r.dob.toISOString().slice(0,10):'', dateAdded:r.date_added?r.date_added.toISOString().slice(0,10):'', addedBy:r.added_by||'' });
+const mapLoan   = r => ({ id:r.id, clientId:r.client_id, amount:Number(r.amount), interestRate:Number(r.interest_rate), term:Number(r.term), startDate:r.start_date?r.start_date.toISOString().slice(0,10):'', purpose:r.purpose||'', notes:r.notes||'', status:r.status||'active', addedBy:r.added_by||'' });
+const mapRepay  = r => ({ id:r.id, loanId:r.loan_id, amount:Number(r.amount), date:r.date?r.date.toISOString().slice(0,10):'', notes:r.notes||'', addedBy:r.added_by||'' });
+const mapExp    = r => ({ id:r.id, amount:Number(r.amount), category:r.category||'', description:r.description||'', date:r.date?r.date.toISOString().slice(0,10):'', addedBy:r.added_by||'' });
+
+// ================================================================
+//  STATUS
+// ================================================================
+app.get('/api/status', (req, res) => {
+  res.json({ connected: dbConnected, timestamp: new Date().toISOString() });
+});
+
+// ================================================================
+//  AUTH
+// ================================================================
+app.post('/api/auth/login', requireDB, async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+    const { rows } = await pool.query('SELECT * FROM users WHERE LOWER(username)=$1 AND active=TRUE', [username.toLowerCase().trim()]);
+    const user = rows[0];
+    if (!user || !await bcrypt.compare(password, user.password_hash))
+      return res.status(401).json({ error: 'Invalid username or password' });
+    await pool.query('UPDATE users SET last_login=NOW() WHERE id=$1', [user.id]);
+    await audit(user.id, user.username, 'LOGIN', 'User', user.id, 'Signed in');
+    const token = jwt.sign({ id:user.id, username:user.username, fullName:user.full_name, role:user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    res.json({ token, user: { id:user.id, username:user.username, fullName:user.full_name, role:user.role } });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/auth/me', requireAuth, requireDB, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT id,username,full_name,role,last_login FROM users WHERE id=$1 AND active=TRUE', [req.user.id]);
+    if (!rows.length) return res.status(401).json({ error: 'User not found' });
+    const u = rows[0];
+    res.json({ id:u.id, username:u.username, fullName:u.full_name, role:u.role, lastLogin:u.last_login });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/auth/verify', (req, res) => {
+  const h = req.headers['authorization'];
+  if (!h?.startsWith('Bearer ')) return res.status(401).json({ valid: false });
+  try { res.json({ valid: true, user: jwt.verify(h.slice(7), JWT_SECRET) }); }
+  catch (e) { res.status(401).json({ valid: false, error: 'Token expired' }); }
+});
+
+app.post('/api/auth/change-password', requireAuth, requireDB, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const { rows } = await pool.query('SELECT * FROM users WHERE id=$1', [req.user.id]);
+    if (!rows[0] || !await bcrypt.compare(currentPassword, rows[0].password_hash))
+      return res.status(400).json({ error: 'Current password is incorrect' });
+    if (newPassword.length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters' });
+    await pool.query('UPDATE users SET password_hash=$1 WHERE id=$2', [await bcrypt.hash(newPassword, 10), req.user.id]);
+    await audit(req.user.id, req.user.username, 'CHANGE_PASSWORD', 'User', req.user.id, '');
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ================================================================
+//  USERS
+// ================================================================
+app.get('/api/users', requireAuth, requireDB, requireRole('admin'), async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT id,username,full_name,role,active,last_login,created_at FROM users ORDER BY created_at DESC');
+    res.json(rows.map(u => ({ id:u.id, username:u.username, fullName:u.full_name, role:u.role, active:u.active, lastLogin:u.last_login, createdAt:u.created_at })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/users', requireAuth, requireDB, requireRole('admin'), async (req, res) => {
+  try {
+    const { username, fullName, role, password } = req.body;
+    if (!username || !fullName || !role || !password) return res.status(400).json({ error: 'All fields required' });
+    if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    const exists = await pool.query('SELECT 1 FROM users WHERE LOWER(username)=$1', [username.toLowerCase()]);
+    if (exists.rows.length) return res.status(409).json({ error: 'Username already exists' });
+    const id = uuidv4();
+    await pool.query(
+      `INSERT INTO users (id,username,full_name,role,password_hash,created_by) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [id, username.toLowerCase().trim(), fullName, role, await bcrypt.hash(password, 10), req.user.id]
+    );
+    await audit(req.user.id, req.user.username, 'CREATE_USER', 'User', id, `Created ${username} role=${role}`);
+    res.status(201).json({ id, username: username.toLowerCase(), fullName, role, active: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/users/:id', requireAuth, requireDB, requireRole('admin'), async (req, res) => {
+  try {
+    const { fullName, role, active, password } = req.body;
+    if (req.params.id === req.user.id && active === false) return res.status(400).json({ error: 'Cannot deactivate your own account' });
+    if (password) {
+      if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      await pool.query('UPDATE users SET full_name=$1,role=$2,active=$3,password_hash=$4 WHERE id=$5', [fullName, role, active !== false, await bcrypt.hash(password, 10), req.params.id]);
+    } else {
+      await pool.query('UPDATE users SET full_name=$1,role=$2,active=$3 WHERE id=$4', [fullName, role, active !== false, req.params.id]);
+    }
+    await audit(req.user.id, req.user.username, 'UPDATE_USER', 'User', req.params.id, `role=${role} active=${active}`);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/users/:id', requireAuth, requireDB, requireRole('admin'), async (req, res) => {
+  try {
+    if (req.params.id === req.user.id) return res.status(400).json({ error: 'Cannot delete your own account' });
+    await pool.query('DELETE FROM users WHERE id=$1', [req.params.id]);
+    await audit(req.user.id, req.user.username, 'DELETE_USER', 'User', req.params.id, '');
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ================================================================
+//  CLIENTS
+// ================================================================
+app.get('/api/clients', requireAuth, requireDB, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM clients ORDER BY date_added DESC');
+    res.json(rows.map(mapClient));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/clients', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
+  try {
+    const { name, phone, nationalId, email, address, occupation, dob, dateAdded } = req.body;
+    if (!name || !phone) return res.status(400).json({ error: 'Name and phone required' });
+    const id = uuidv4();
+    await pool.query(
+      `INSERT INTO clients (id,name,phone,national_id,email,address,occupation,dob,date_added,added_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [id, name, phone, nationalId||null, email||null, address||null, occupation||null, dob||null, dateAdded||new Date(), req.user.id]
+    );
+    await audit(req.user.id, req.user.username, 'ADD_CLIENT', 'Client', id, `Added ${name}`);
+    const { rows } = await pool.query('SELECT * FROM clients WHERE id=$1', [id]);
+    res.status(201).json(mapClient(rows[0]));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/clients/:id', requireAuth, requireDB, requireRole('admin'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM clients WHERE id=$1', [req.params.id]);
+    await audit(req.user.id, req.user.username, 'DELETE_CLIENT', 'Client', req.params.id, '');
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ================================================================
+//  LOANS
+// ================================================================
+app.get('/api/loans', requireAuth, requireDB, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM loans ORDER BY start_date DESC');
+    res.json(rows.map(mapLoan));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/loans', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
+  try {
+    const { clientId, amount, interestRate, term, startDate, purpose, notes } = req.body;
+    if (!clientId || !amount || !interestRate || !term || !startDate) return res.status(400).json({ error: 'Missing required fields' });
+    const id = uuidv4();
+    await pool.query(
+      `INSERT INTO loans (id,client_id,amount,interest_rate,term,start_date,purpose,notes,added_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [id, clientId, amount, interestRate, term, startDate, purpose||null, notes||null, req.user.id]
+    );
+    await audit(req.user.id, req.user.username, 'DISBURSE_LOAN', 'Loan', id, `$${amount} to ${clientId}`);
+    const { rows } = await pool.query('SELECT * FROM loans WHERE id=$1', [id]);
+    res.status(201).json(mapLoan(rows[0]));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/loans/:id', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
+  try {
+    await pool.query('UPDATE loans SET status=$1,notes=$2,updated_at=NOW() WHERE id=$3', [req.body.status, req.body.notes||null, req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/loans/:id', requireAuth, requireDB, requireRole('admin'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM loans WHERE id=$1', [req.params.id]);
+    await audit(req.user.id, req.user.username, 'DELETE_LOAN', 'Loan', req.params.id, '');
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ================================================================
+//  REPAYMENTS
+// ================================================================
+app.get('/api/repayments', requireAuth, requireDB, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM repayments ORDER BY date DESC');
+    res.json(rows.map(mapRepay));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/repayments', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
+  try {
+    const { loanId, amount, date, notes } = req.body;
+    if (!loanId || !amount || !date) return res.status(400).json({ error: 'loanId, amount and date required' });
+    const id = uuidv4();
+    await pool.query(
+      `INSERT INTO repayments (id,loan_id,amount,date,notes,added_by) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [id, loanId, amount, date, notes||null, req.user.id]
+    );
+    // Auto-complete loan if fully paid
+    const loanRes = await pool.query('SELECT * FROM loans WHERE id=$1', [loanId]);
+    const loan = loanRes.rows[0];
+    if (loan) {
+      const totalOwed = Number(loan.amount) + Number(loan.amount) * Number(loan.interest_rate) / 100;
+      const paidRes  = await pool.query('SELECT COALESCE(SUM(amount),0) AS paid FROM repayments WHERE loan_id=$1', [loanId]);
+      if (Number(paidRes.rows[0].paid) >= totalOwed)
+        await pool.query("UPDATE loans SET status='completed',updated_at=NOW() WHERE id=$1", [loanId]);
+    }
+    await audit(req.user.id, req.user.username, 'RECORD_REPAYMENT', 'Repayment', id, `$${amount} for loan ${loanId}`);
+    const { rows } = await pool.query('SELECT * FROM repayments WHERE id=$1', [id]);
+    res.status(201).json(mapRepay(rows[0]));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/repayments/:id', requireAuth, requireDB, requireRole('admin'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM repayments WHERE id=$1', [req.params.id]);
+    await audit(req.user.id, req.user.username, 'DELETE_REPAYMENT', 'Repayment', req.params.id, '');
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ================================================================
+//  EXPENSES
+// ================================================================
+app.get('/api/expenses', requireAuth, requireDB, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM expenses ORDER BY date DESC');
+    res.json(rows.map(mapExp));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/expenses', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
+  try {
+    const { amount, category, description, date } = req.body;
+    if (!amount || !category || !date) return res.status(400).json({ error: 'amount, category and date required' });
+    const id = uuidv4();
+    await pool.query(
+      `INSERT INTO expenses (id,amount,category,description,date,added_by) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [id, amount, category, description||null, date, req.user.id]
+    );
+    await audit(req.user.id, req.user.username, 'ADD_EXPENSE', 'Expense', id, `$${amount} — ${category}`);
+    const { rows } = await pool.query('SELECT * FROM expenses WHERE id=$1', [id]);
+    res.status(201).json(mapExp(rows[0]));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/expenses/:id', requireAuth, requireDB, requireRole('admin'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM expenses WHERE id=$1', [req.params.id]);
+    await audit(req.user.id, req.user.username, 'DELETE_EXPENSE', 'Expense', req.params.id, '');
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ================================================================
+//  AUDIT LOG
+// ================================================================
+app.get('/api/audit', requireAuth, requireDB, requireRole('admin'), async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 200');
+    res.json(rows.map(r => ({ id:r.id, userId:r.user_id, username:r.username, action:r.action, entity:r.entity, entityId:r.entity_id, detail:r.detail, createdAt:r.created_at })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ================================================================
+//  FALLBACK → serve frontend
+// ================================================================
+app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+
+// ================================================================
+//  START
+// ================================================================
+app.listen(PORT, () => {
+  console.log(`\n🚀  CrediConnect v3.0 running on port ${PORT}`);
+  console.log(`    DB: ${dbConnected ? '✅ PostgreSQL connected' : '⚠️  Not connected'}`);
+  console.log(`    Default login: admin / Admin@1234\n`);
+});

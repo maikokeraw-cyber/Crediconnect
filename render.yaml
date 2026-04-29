@@ -1,0 +1,24 @@
+# ================================================================
+#  CrediConnect — Render Blueprint
+#  Uses Supabase for the database (not Render's database).
+#  Commit this file to the root of your GitHub repo.
+# ================================================================
+
+services:
+  - type: web
+    name: crediconnect
+    env: node
+    region: oregon
+    plan: free
+    buildCommand: npm install
+    startCommand: node scripts/setupDb.js && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_SSL
+        value: true
+      - key: JWT_EXPIRES_IN
+        value: 8h
+      # Set these manually in Render Dashboard → Environment:
+      # DATABASE_URL  →  your Supabase connection string
+      # JWT_SECRET    →  a long random secret string
