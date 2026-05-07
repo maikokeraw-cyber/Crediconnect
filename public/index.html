@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CrediConnect — Microfinance Management</title>
+<title>Credinova — Financial Solutions</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
@@ -207,8 +207,8 @@ input::placeholder{color:var(--text3)}
 <div id="loginScreen">
   <div class="login-box">
     <div class="login-logo">
-      <div class="login-logo-mark">CrediConnect</div>
-      <div class="login-logo-sub">Microfinance Management</div>
+      <div class="login-logo-mark">Credinova</div>
+      <div class="login-logo-sub">Financial Solutions</div>
     </div>
     <div class="login-title">Welcome back</div>
     <div class="login-sub">Sign in to access your dashboard</div>
@@ -230,7 +230,7 @@ input::placeholder{color:var(--text3)}
   </div>
   <div id="appLayout">
     <nav id="sidebar">
-      <div class="logo"><div class="logo-mark">CrediConnect</div><div class="logo-sub">Microfinance System</div></div>
+      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions</div></div>
       <div class="nav">
         <div class="nav-section">Overview</div>
         <div class="nav-item active" id="nav-dashboard" onclick="navigate('dashboard')"><span class="icon">📊</span>Dashboard</div>
@@ -309,15 +309,38 @@ input::placeholder{color:var(--text3)}
   <div class="modal-footer" id="cdFooter"></div>
 </div></div>
 
+<!-- Edit Client Modal -->
+<div class="modal-backdrop" id="mEditClient"><div class="modal">
+  <div class="modal-header"><div class="modal-title">Edit Client</div><button class="modal-close" onclick="CM('mEditClient')">×</button></div>
+  <div class="modal-body"><div class="form-grid">
+    <div class="form-group"><label>Full Name *</label><input id="eCN" placeholder="John Doe"></div>
+    <div class="form-group"><label>Phone *</label><input id="eCP" placeholder="+263 77 123 4567"></div>
+    <div class="form-group"><label>National ID</label><input id="eCI" placeholder="ID Number"></div>
+    <div class="form-group"><label>Email</label><input id="eCE" type="email" placeholder="email@example.com"></div>
+    <div class="form-group full"><label>Address</label><textarea id="eCA" placeholder="Full address…"></textarea></div>
+    <div class="form-group"><label>Date of Birth</label><input id="eCD" type="date"></div>
+    <div class="form-group"><label>Occupation</label><input id="eCO" placeholder="e.g. Farmer, Trader"></div>
+  </div></div>
+  <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mEditClient')">Cancel</button><button class="btn btn-primary" onclick="saveEditClient()">Save Changes</button></div>
+</div></div>
+
 <div class="modal-backdrop" id="mAddLoan"><div class="modal">
   <div class="modal-header"><div class="modal-title">New Loan Application</div><button class="modal-close" onclick="CM('mAddLoan')">×</button></div>
   <div class="modal-body"><div class="form-grid">
     <div class="form-group full"><label>Client *</label><select id="fLC"><option value="">— Select Client —</option></select></div>
     <div class="form-group"><label>Principal Amount *</label><input id="fLA" type="number" placeholder="5000"></div>
     <div class="form-group"><label>Interest Rate (%) *</label><input id="fLR" type="number" placeholder="12" step="0.5"></div>
-    <div class="form-group"><label>Term (Months) *</label><input id="fLT" type="number" placeholder="12"></div>
+    <div class="form-group"><label>Term (Number) *</label><input id="fLT" type="number" placeholder="12"></div>
+    <div class="form-group"><label>Term Frequency *</label>
+      <select id="fLF">
+        <option value="monthly">Monthly</option>
+        <option value="weekly">Weekly</option>
+        <option value="daily">Daily</option>
+      </select>
+    </div>
     <div class="form-group"><label>Disbursement Date *</label><input id="fLD" type="date"></div>
     <div class="form-group"><label>Purpose</label><input id="fLP" placeholder="Business, Agriculture…"></div>
+    <div class="form-group"><label>Admin Fees <span style="font-size:10px;color:var(--text3)">(optional)</span></label><input id="fLAF" type="number" placeholder="0.00" step="0.01"></div>
     <div class="form-group full"><label>Notes</label><textarea id="fLN" placeholder="Additional notes…"></textarea></div>
   </div>
   <div id="loanPreview" style="display:none;margin-top:12px;padding:12px;background:var(--surface);border-radius:var(--radius-sm);font-size:12.5px;color:var(--text2)">
@@ -610,6 +633,17 @@ function fmtDT(d){ if(!d) return '—'; try{ return new Date(d).toLocaleString('
 function getLoanTotal(l){ return l.amount+(l.amount*l.interestRate/100); }
 function getLoanPaid(id){ return repayments.filter(r=>r.loanId===id).reduce((s,r)=>s+r.amount,0); }
 function getLoanBalance(id){ const l=loans.find(l=>l.id===id);if(!l)return 0;return Math.max(0,getLoanTotal(l)-getLoanPaid(id)); }
+// Use balance to determine true status — fixes completed loans showing incorrectly
+function getLoanStatus(loan){
+  const bal=getLoanBalance(loan.id);
+  if(loan.status==='defaulted') return 'defaulted';
+  if(bal<=0.005) return 'completed';   // ≤ half a cent = fully paid
+  return loan.status||'active';
+}
+function termLabel(loan){
+  const f=loan.termFrequency||'monthly';
+  return `${loan.term} ${f}`;
+}
 function clientLoans(cid){ return loans.filter(l=>l.clientId===cid); }
 function avatarColor(n){ const c=['#3b82f6','#8b5cf6','#ec4899','#10b981','#f59e0b','#ef4444','#06b6d4'];let h=0;for(let ch of(n||''))h+=ch.charCodeAt(0);return c[h%c.length]; }
 function initials(n){ return(n||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(); }
@@ -652,6 +686,25 @@ function renderDashboard(){
   const al=loans.filter(l=>l.status==='active');
   const td=loans.reduce((s,l)=>s+l.amount,0),tc=repayments.reduce((s,r)=>s+r.amount,0);
   const te=expenses.reduce((s,e)=>s+e.amount,0),to=al.reduce((s,l)=>s+getLoanBalance(l.id),0);
+
+  // Expected interest calculations
+  const thisMonthStr = new Date().toISOString().slice(0,7);
+  const nextMonthDate = new Date(); nextMonthDate.setMonth(nextMonthDate.getMonth()+1);
+  const nextMonthStr = nextMonthDate.toISOString().slice(0,7);
+
+  let thisMonthInterest=0, nextMonthInterest=0, thisMonthPrincipal=0, nextMonthPrincipal=0;
+  al.forEach(loan=>{
+    const amort = buildAmortisation(loan);
+    amort.forEach(row=>{
+      if(row.dueDate.startsWith(thisMonthStr)){ thisMonthInterest+=row.interest; thisMonthPrincipal+=row.principal; }
+      if(row.dueDate.startsWith(nextMonthStr)){ nextMonthInterest+=row.interest; nextMonthPrincipal+=row.principal; }
+    });
+  });
+  const thisMonthTotal  = thisMonthInterest + thisMonthPrincipal;
+  const nextMonthTotal  = nextMonthInterest + nextMonthPrincipal;
+  const thisMonthName   = new Date().toLocaleString('en',{month:'long',year:'numeric'});
+  const nextMonthName   = nextMonthDate.toLocaleString('en',{month:'long',year:'numeric'});
+
   const pg=document.getElementById('page-dashboard');
   pg.innerHTML=`
     <div class="stats-grid">
@@ -660,6 +713,39 @@ function renderDashboard(){
       <div class="stat-card blue"><span class="stat-icon">👥</span><div class="stat-label">Clients</div><div class="stat-value">${clients.length}</div><div class="stat-sub">${al.length} active loans</div></div>
       <div class="stat-card red"><span class="stat-icon">⚠️</span><div class="stat-label">Outstanding</div><div class="stat-value">$${fmt(to)}</div><div class="stat-sub">Active balances</div></div>
     </div>
+
+    <!-- Expected Interest This Month & Next Month -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:22px">
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <span style="font-size:13px;font-weight:600">📅 Expected — ${thisMonthName}</span>
+          <span style="font-size:11px;background:var(--amber-dim);color:var(--amber);padding:2px 8px;border-radius:10px;font-weight:600">This Month</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          ${[['Interest','$'+fmt(thisMonthInterest),'var(--amber)'],['Principal','$'+fmt(thisMonthPrincipal),'var(--blue)'],['Total Due','$'+fmt(thisMonthTotal),'var(--green)']].map(([l,v,c])=>`
+          <div style="background:var(--surface);border-radius:var(--radius-sm);padding:10px;text-align:center;border:1px solid var(--border)">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:4px">${l}</div>
+            <div style="font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:${c}">${v}</div>
+          </div>`).join('')}
+        </div>
+        <div style="margin-top:10px;font-size:11px;color:var(--text3)">Across ${al.length} active loan${al.length!==1?'s':''}</div>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <span style="font-size:13px;font-weight:600">📅 Expected — ${nextMonthName}</span>
+          <span style="font-size:11px;background:var(--blue-dim);color:var(--blue);padding:2px 8px;border-radius:10px;font-weight:600">Next Month</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          ${[['Interest','$'+fmt(nextMonthInterest),'var(--amber)'],['Principal','$'+fmt(nextMonthPrincipal),'var(--blue)'],['Total Due','$'+fmt(nextMonthTotal),'var(--green)']].map(([l,v,c])=>`
+          <div style="background:var(--surface);border-radius:var(--radius-sm);padding:10px;text-align:center;border:1px solid var(--border)">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:4px">${l}</div>
+            <div style="font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:${c}">${v}</div>
+          </div>`).join('')}
+        </div>
+        <div style="margin-top:10px;font-size:11px;color:var(--text3)">Projected from amortisation schedules</div>
+      </div>
+    </div>
+
     <div class="two-col">
       <div class="card"><div class="card-header"><span class="card-title">Portfolio Status</span></div><div class="card-body"><div class="chart-container"><canvas id="cPortfolio"></canvas></div></div></div>
       <div class="card"><div class="card-header"><span class="card-title">Monthly Repayments</span></div><div class="card-body"><div class="chart-container"><canvas id="cRepay"></canvas></div></div></div>
@@ -710,7 +796,7 @@ function renderClients(){
       <td>${c.phone}</td><td style="font-family:'DM Mono',monospace;font-size:12px">${c.nationalId||'—'}</td>
       <td>${al?`<span class="badge badge-active">${al} active</span>`:'<span style="color:var(--text3)">None</span>'}</td>
       <td style="font-family:'DM Mono',monospace">$${fmt(bor)}</td><td>${fmtDate(c.dateAdded)}</td>
-      <td onclick="event.stopPropagation()">${can('write')?`<button class="btn btn-ghost btn-sm" onclick="openAddLoan('${c.id}')">+ Loan</button>`:''}</td>
+      <td onclick="event.stopPropagation()">${can('write')?`<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditClient('${c.id}')">✏️ Edit</button> <button class="btn btn-ghost btn-sm" onclick="openAddLoan('${c.id}')">+ Loan</button>`:''}</td>
     </tr>`;
   }).join('');
 }
@@ -749,6 +835,7 @@ function openClientDetail(id){
     `<div style="color:var(--text3);text-align:center;padding:20px">No loans for this client</div>`}`;
   document.getElementById('cdFooter').innerHTML=`
     ${can('delete')?`<button class="btn btn-danger btn-sm" onclick="deleteClient('${id}')">Delete Client</button>`:''}
+    ${can('write')?`<button class="btn btn-ghost btn-sm" onclick="CM('mClientDetail');openEditClient('${id}')">✏️ Edit</button>`:''}
     ${can('write')?`<button class="btn btn-primary" onclick="CM('mClientDetail');openAddLoan('${id}')">+ Add Loan</button>`:''}
     <button class="btn btn-ghost" onclick="CM('mClientDetail')">Close</button>`;
   OM('mClientDetail');
@@ -761,6 +848,38 @@ function deleteClient(id){
   }).catch(e=>toast('Error: '+e.message,'error'));
 }
 
+let _editClientId=null;
+function openEditClient(id){
+  const c=clients.find(c=>c.id===id);if(!c)return;
+  _editClientId=id;
+  document.getElementById('eCN').value=c.name||'';
+  document.getElementById('eCP').value=c.phone||'';
+  document.getElementById('eCI').value=c.nationalId||'';
+  document.getElementById('eCE').value=c.email||'';
+  document.getElementById('eCA').value=c.address||'';
+  document.getElementById('eCD').value=c.dob||'';
+  document.getElementById('eCO').value=c.occupation||'';
+  OM('mEditClient');
+}
+async function saveEditClient(){
+  const name=document.getElementById('eCN').value.trim(),phone=document.getElementById('eCP').value.trim();
+  if(!name||!phone)return toast('Name and phone are required','error');
+  const c=clients.find(c=>c.id===_editClientId);if(!c)return;
+  const updated={...c,name,phone,nationalId:document.getElementById('eCI').value.trim(),email:document.getElementById('eCE').value.trim(),address:document.getElementById('eCA').value.trim(),occupation:document.getElementById('eCO').value.trim(),dob:document.getElementById('eCD').value||''};
+  if(USE_DB){
+    try{
+      await apiFetch('PUT',`/api/clients/${_editClientId}`,updated);
+      Object.assign(c,updated);saveAll();
+      addAudit('EDIT_CLIENT','Client',_editClientId,`Updated ${name}`);
+      CM('mEditClient');renderClients();updateStorageInfo();toast('Client updated','success');
+    }catch(e){toast('Error: '+e.message,'error');}
+  } else {
+    Object.assign(c,updated);saveAll();
+    addAudit('EDIT_CLIENT','Client',_editClientId,`Updated ${name}`);
+    CM('mEditClient');renderClients();updateStorageInfo();toast('Client updated','success');
+  }
+}
+
 // ================================================================
 //  LOANS
 // ================================================================
@@ -771,11 +890,12 @@ function renderLoans(){
   if(!data.length){cont.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="emoji">💰</div><p>No loans found</p></div>`;return;}
   cont.innerHTML=data.map(l=>{
     const c=clients.find(c=>c.id===l.clientId),tot=getLoanTotal(l),bal=getLoanBalance(l.id),paid=tot-bal,pct=Math.min(100,Math.round(paid/tot*100));
+    const status=getLoanStatus(l);
     return `<div class="loan-card" onclick="openLoanDetail('${l.id}')">
-      <div class="loan-card-header"><div><div class="loan-amount">$${fmt(l.amount)}</div><div class="loan-purpose">${l.purpose||'General Loan'}</div></div><span class="badge badge-${l.status}">${l.status}</span></div>
+      <div class="loan-card-header"><div><div class="loan-amount">$${fmt(l.amount)}</div><div class="loan-purpose">${l.purpose||'General Loan'}</div></div><span class="badge badge-${status}">${status}</span></div>
       <div class="name-cell" style="margin-bottom:10px"><div class="avatar" style="background:${c?avatarColor(c.name):'#666'};width:24px;height:24px;font-size:10px">${c?initials(c.name):'?'}</div><span style="font-size:13px;font-weight:500">${c?c.name:'Unknown'}</span></div>
       <div class="loan-progress"><div class="loan-progress-label"><span>Repaid: $${fmt(paid)}</span><span>${pct}%</span></div><div class="progress-bar"><div class="progress-fill ${pct<30?'red':pct<70?'amber':''}" style="width:${pct}%"></div></div></div>
-      <div class="loan-card-footer"><div style="font-size:11px;color:var(--text3)">📅 ${fmtDate(l.startDate)} · ${l.term}mo · ${l.interestRate}%</div><div style="font-size:12px;color:var(--text2)">Bal: <strong style="color:${bal>0?'var(--red)':'var(--green)'}">${bal>0?'$'+fmt(bal):'Paid ✓'}</strong></div></div>
+      <div class="loan-card-footer"><div style="font-size:11px;color:var(--text3)">📅 ${fmtDate(l.startDate)} · ${termLabel(l)} · ${l.interestRate}%</div><div style="font-size:12px;color:var(--text2)">Bal: <strong style="color:${bal>0?'var(--red)':'var(--green)'}">${bal>0?'$'+fmt(bal):'Paid ✓'}</strong></div></div>
     </div>`;
   }).join('');
 }
@@ -784,48 +904,152 @@ function openAddLoan(preselect){
   const sel=document.getElementById('fLC');
   sel.innerHTML='<option value="">— Select Client —</option>'+clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
   if(preselect)sel.value=preselect;
-  ['fLA','fLR','fLT','fLP','fLN'].forEach(i=>{const el=document.getElementById(i);if(el)el.value='';});
+  ['fLA','fLR','fLT','fLP','fLN','fLAF'].forEach(i=>{const el=document.getElementById(i);if(el)el.value='';});
   document.getElementById('fLD').value=today();
+  document.getElementById('fLF').value='monthly';
   document.getElementById('loanPreview').style.display='none';
   OM('mAddLoan');
 }
-['fLA','fLR','fLT'].forEach(id=>{document.getElementById(id)?.addEventListener('input',()=>{
-  const a=parseFloat(document.getElementById('fLA').value),r=parseFloat(document.getElementById('fLR').value),t=parseInt(document.getElementById('fLT').value),p=document.getElementById('loanPreview');
-  if(a&&r&&t){document.getElementById('loanPreviewText').innerHTML=`Principal: <b style="color:var(--text)">$${fmt(a)}</b> | Interest: <b>$${fmt(a*r/100)}</b> | Total: <b style="color:var(--gold2)">$${fmt(a+a*r/100)}</b> | Monthly: <b style="color:var(--green)">$${fmt((a+a*r/100)/t)}</b>`;p.style.display='block';}else p.style.display='none';
-});});
+function openAddLoanForClient(id){openAddLoan(id);}
+['fLA','fLR','fLT'].forEach(id=>{document.getElementById(id)?.addEventListener('input',updateLoanPreview);});
+document.getElementById('fLF')?.addEventListener('change',updateLoanPreview);
+function updateLoanPreview(){
+  const a=parseFloat(document.getElementById('fLA').value),r=parseFloat(document.getElementById('fLR').value),t=parseInt(document.getElementById('fLT').value),f=document.getElementById('fLF').value,p=document.getElementById('loanPreview');
+  if(a&&r&&t){
+    const interest=a*r/100,total=a+interest,periodic=total/t;
+    const freqLabel={'monthly':'Monthly','weekly':'Weekly','daily':'Daily'}[f]||'Periodic';
+    document.getElementById('loanPreviewText').innerHTML=`Principal: <b style="color:var(--text)">$${fmt(a)}</b> | Interest: <b>$${fmt(interest)}</b> | Total: <b style="color:var(--gold2)">$${fmt(total)}</b> | ${freqLabel} Payment: <b style="color:var(--green)">$${fmt(periodic)}</b>`;
+    p.style.display='block';
+  }else p.style.display='none';
+}
 
 function saveLoan(){
-  const clientId=document.getElementById('fLC').value,amount=parseFloat(document.getElementById('fLA').value),rate=parseFloat(document.getElementById('fLR').value),term=parseInt(document.getElementById('fLT').value),date=document.getElementById('fLD').value;
+  const clientId=document.getElementById('fLC').value,amount=parseFloat(document.getElementById('fLA').value),rate=parseFloat(document.getElementById('fLR').value),term=parseInt(document.getElementById('fLT').value),date=document.getElementById('fLD').value,freq=document.getElementById('fLF').value;
+  const adminFees=parseFloat(document.getElementById('fLAF').value)||0;
   if(!clientId||!amount||!rate||!term||!date)return toast('Please fill all required fields','error');
-  addLoan({clientId,amount,interestRate:rate,term,startDate:date,purpose:document.getElementById('fLP').value.trim(),notes:document.getElementById('fLN').value.trim()}).then(r=>{
-    addAudit('DISBURSE_LOAN','Loan',r.id,`$${amount} disbursed`);
-    CM('mAddLoan');renderLoans();updateStorageInfo();toast('Loan disbursed','success');
+  addLoan({clientId,amount,interestRate:rate,term,termFrequency:freq,startDate:date,purpose:document.getElementById('fLP').value.trim(),notes:document.getElementById('fLN').value.trim(),adminFees}).then(r=>{
+    if(adminFees>0){
+      const c=clients.find(c=>c.id===clientId);
+      addExpenseData({amount:adminFees,category:'Bank Charges',description:`Admin fees — loan to ${c?c.name:'client'} ($${fmt(amount)})`,date}).then(()=>{}).catch(()=>{});
+    }
+    addAudit('DISBURSE_LOAN','Loan',r.id,`$${amount} disbursed${adminFees>0?' + $'+fmt(adminFees)+' admin fee':''}`);
+    CM('mAddLoan');renderLoans();updateStorageInfo();toast('Loan disbursed'+(adminFees>0?` — admin fee $${fmt(adminFees)} recorded`:''),'success');
   }).catch(e=>toast('Error: '+e.message,'error'));
+}
+
+// ── Amortisation helpers ─────────────────────────────────────────
+function buildAmortisation(loan){
+  const totalInterest    = loan.amount * loan.interestRate / 100;
+  const periodicInterest = totalInterest / loan.term;
+  const periodicPrincipal= loan.amount   / loan.term;
+  const periodicPayment  = periodicInterest + periodicPrincipal;
+  const freq             = loan.termFrequency || 'monthly';
+  const rows = [];
+  let balance = loan.amount;
+  const start = new Date(loan.startDate + 'T00:00:00');
+  for(let m = 1; m <= loan.term; m++){
+    const due = new Date(start);
+    if(freq==='monthly')      due.setMonth(due.getMonth()+m);
+    else if(freq==='weekly')  due.setDate(due.getDate()+(m*7));
+    else                      due.setDate(due.getDate()+m); // daily
+    balance = Math.max(0, balance - periodicPrincipal);
+    rows.push({ month:m, dueDate:due.toISOString().slice(0,10), payment:periodicPayment, principal:periodicPrincipal, interest:periodicInterest, balance });
+  }
+  return rows;
+}
+
+function periodicInterestForLoan(loan){
+  return loan.amount * loan.interestRate / 100 / loan.term;
 }
 
 function openLoanDetail(id){
   const loan=loans.find(l=>l.id===id);if(!loan)return;
   const c=clients.find(c=>c.id===loan.clientId),tot=getLoanTotal(loan),bal=getLoanBalance(id),paid=tot-bal,pct=Math.min(100,Math.round(paid/tot*100));
   const rps=repayments.filter(r=>r.loanId===id).sort((a,b)=>b.date.localeCompare(a.date));
+  const amort=buildAmortisation(loan);
+  const periodicInt=periodicInterestForLoan(loan);
+  const periodicPrin=loan.amount/loan.term;
+  const periodicPay=getLoanTotal(loan)/loan.term;
+  const freq=loan.termFrequency||'monthly';
+  const freqLabel={'monthly':'Monthly','weekly':'Weekly','daily':'Daily'}[freq];
+  const status=getLoanStatus(loan);
+
+  // Determine current & next period due rows
+  const todayStr=today();
+  const nextDue=amort.find(r=>r.dueDate>=todayStr)||null;
+  const nextNextDue=nextDue?amort.find(r=>r.dueDate>nextDue.dueDate)||null:null;
+
   document.getElementById('ldTitle').textContent=`Loan — ${c?c.name:'?'} ($${fmt(loan.amount)})`;
   document.getElementById('ldBody').innerHTML=`
     <div class="detail-grid" style="margin-bottom:16px">
       <div class="detail-item"><label>Client</label><div class="val">${c?c.name:'—'}</div></div>
-      <div class="detail-item"><label>Status</label><div class="val"><span class="badge badge-${loan.status}">${loan.status}</span></div></div>
+      <div class="detail-item"><label>Status</label><div class="val"><span class="badge badge-${status}">${status}</span></div></div>
       <div class="detail-item"><label>Principal</label><div class="val" style="color:var(--gold2)">$${fmt(loan.amount)}</div></div>
-      <div class="detail-item"><label>Interest Rate</label><div class="val">${loan.interestRate}%</div></div>
+      <div class="detail-item"><label>Interest Rate</label><div class="val">${loan.interestRate}% flat</div></div>
+      <div class="detail-item"><label>Total Interest</label><div class="val" style="color:var(--amber)">$${fmt(loan.amount*loan.interestRate/100)}</div></div>
       <div class="detail-item"><label>Total Owed</label><div class="val">$${fmt(tot)}</div></div>
-      <div class="detail-item"><label>Monthly Payment</label><div class="val" style="color:var(--green)">$${fmt(tot/loan.term)}</div></div>
-      <div class="detail-item"><label>Term</label><div class="val">${loan.term} months</div></div>
+      <div class="detail-item"><label>${freqLabel} Payment</label><div class="val" style="color:var(--green)">$${fmt(periodicPay)}</div></div>
+      <div class="detail-item"><label>${freqLabel} Interest</label><div class="val" style="color:var(--amber)">$${fmt(periodicInt)}</div></div>
+      <div class="detail-item"><label>${freqLabel} Principal</label><div class="val" style="color:var(--blue)">$${fmt(periodicPrin)}</div></div>
+      <div class="detail-item"><label>Term</label><div class="val">${termLabel(loan)}</div></div>
       <div class="detail-item"><label>Start Date</label><div class="val">${fmtDate(loan.startDate)}</div></div>
-      <div class="detail-item"><label>Purpose</label><div class="val">${loan.purpose||'—'}</div></div>
       <div class="detail-item"><label>Balance</label><div class="val" style="color:${bal>0?'var(--red)':'var(--green)'}">${bal>0?'$'+fmt(bal):'✓ Fully Paid'}</div></div>
+      ${loan.adminFees>0?`<div class="detail-item"><label>Admin Fees</label><div class="val" style="color:var(--text2)">$${fmt(loan.adminFees)}</div></div>`:''}
+      ${loan.purpose?`<div class="detail-item"><label>Purpose</label><div class="val">${loan.purpose}</div></div>`:''}
     </div>
+
+    ${status==='active'?`
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+      <div style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:var(--radius-sm);padding:14px">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--amber);font-weight:700;margin-bottom:6px">This Period's Interest Due</div>
+        <div style="font-family:'Playfair Display',serif;font-size:22px;font-weight:600;color:var(--amber)">$${fmt(periodicInt)}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:4px">Due: ${nextDue?fmtDate(nextDue.dueDate):'—'}</div>
+      </div>
+      <div style="background:rgba(74,141,245,0.08);border:1px solid var(--blue);border-radius:var(--radius-sm);padding:14px">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--blue);font-weight:700;margin-bottom:6px">Next Period's Interest Due</div>
+        <div style="font-family:'Playfair Display',serif;font-size:22px;font-weight:600;color:var(--blue)">$${fmt(periodicInt)}</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:4px">Due: ${nextNextDue?fmtDate(nextNextDue.dueDate):'—'}</div>
+      </div>
+    </div>`:''}
+
     <div style="margin-bottom:16px"><div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2);margin-bottom:6px"><span>Repayment Progress</span><span>${pct}% (${rps.length} payments)</span></div><div class="progress-bar" style="height:8px"><div class="progress-fill ${pct<40?'red':pct<70?'amber':''}" style="width:${pct}%"></div></div></div>
+
+    <div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--text3);font-weight:600;margin-bottom:8px">Amortisation Schedule</div>
+    <div style="overflow-x:auto;margin-bottom:16px">
+      <table style="width:100%;font-size:12px;border-collapse:collapse;min-width:500px">
+        <thead><tr>
+          <th style="text-align:center;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px;border-bottom:1px solid var(--border)">#</th>
+          <th style="text-align:left;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px;border-bottom:1px solid var(--border)">Due Date</th>
+          <th style="text-align:right;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px;border-bottom:1px solid var(--border)">Payment</th>
+          <th style="text-align:right;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px;border-bottom:1px solid var(--border)">Principal</th>
+          <th style="text-align:right;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px;border-bottom:1px solid var(--border)">Interest</th>
+          <th style="text-align:right;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px;border-bottom:1px solid var(--border)">Balance</th>
+        </tr></thead>
+        <tbody>${amort.map(row=>{
+          const isThis=nextDue&&row.dueDate===nextDue.dueDate;
+          const isNext=nextNextDue&&row.dueDate===nextNextDue.dueDate;
+          const bg=isThis?'background:rgba(240,168,50,0.07)':isNext?'background:rgba(74,141,245,0.07)':'';
+          return`<tr style="border-bottom:1px solid var(--border);${bg}">
+            <td style="padding:7px 10px;text-align:center;color:var(--text3)">${row.month}${isThis?' <span style="font-size:9px;background:var(--amber);color:#000;padding:1px 5px;border-radius:4px;font-weight:700">NOW</span>':isNext?' <span style="font-size:9px;background:var(--blue);color:#fff;padding:1px 5px;border-radius:4px;font-weight:700">NEXT</span>':''}</td>
+            <td style="padding:7px 10px;color:var(--text2)">${fmtDate(row.dueDate)}</td>
+            <td style="padding:7px 10px;text-align:right;font-family:'DM Mono',monospace;color:var(--green)">$${fmt(row.payment)}</td>
+            <td style="padding:7px 10px;text-align:right;font-family:'DM Mono',monospace;color:var(--blue)">$${fmt(row.principal)}</td>
+            <td style="padding:7px 10px;text-align:right;font-family:'DM Mono',monospace;color:var(--amber)">$${fmt(row.interest)}</td>
+            <td style="padding:7px 10px;text-align:right;font-family:'DM Mono',monospace;color:var(--text2)">$${fmt(row.balance)}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>
+
     ${rps.length?`<div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--text3);font-weight:600;margin-bottom:8px">Payment History</div>
-    <table style="width:100%;font-size:12.5px;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:8px 10px;background:var(--surface);color:var(--text3);font-size:10px">Date</th><th style="text-align:right;padding:8px 10px;background:var(--surface);color:var(--text3);font-size:10px">Amount</th><th style="text-align:left;padding:8px 10px;background:var(--surface);color:var(--text3);font-size:10px">Notes</th></tr></thead>
+    <table style="width:100%;font-size:12.5px;border-collapse:collapse"><thead><tr>
+      <th style="text-align:left;padding:8px 10px;background:var(--surface);color:var(--text3);font-size:10px">Date</th>
+      <th style="text-align:right;padding:8px 10px;background:var(--surface);color:var(--text3);font-size:10px">Amount</th>
+      <th style="text-align:left;padding:8px 10px;background:var(--surface);color:var(--text3);font-size:10px">Notes</th>
+    </tr></thead>
     <tbody>${rps.map(r=>`<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 10px;color:var(--text2)">${fmtDate(r.date)}</td><td style="padding:8px 10px;color:var(--green);text-align:right;font-family:'DM Mono',monospace">+$${fmt(r.amount)}</td><td style="padding:8px 10px;color:var(--text3)">${r.notes||'—'}</td></tr>`).join('')}</tbody></table>`:
     '<div style="text-align:center;padding:20px;color:var(--text3)">No payments recorded yet</div>'}`;
+
   document.getElementById('ldFooter').innerHTML=`
     ${can('delete')?`<button class="btn btn-danger btn-sm" onclick="deleteLoan('${id}')">Delete Loan</button>`:''}
     ${can('write')?`<button class="btn btn-success btn-sm" onclick="CM('mLoanDetail');openAddRepayForLoan('${id}')">+ Record Payment</button>`:''}
@@ -1068,7 +1292,7 @@ async function renderUsers(){
   document.getElementById('usrContent').innerHTML=`
     <div class="card" style="margin-bottom:20px"><div class="table-wrap"><table>
       <thead><tr><th>User</th><th>Username</th><th>Role</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
-      <tbody>${users.map(u=>`<tr>
+      <tbody>${userList.map(u=>`<tr>
         <td class="primary"><div class="name-cell"><div class="avatar" style="background:${avatarColor(u.fullName)}">${initials(u.fullName)}</div>${u.fullName}</div></td>
         <td style="font-family:'DM Mono',monospace;font-size:12px">@${u.username}</td>
         <td>${roleBadge(u.role)}</td>
@@ -1280,7 +1504,7 @@ function exportCSV(type='all'){
   toast(type==='all'?'All CSV files exported':'CSV exported','success');
 }
 function exportJSON(){
-  const data={exportedAt:new Date().toISOString(),version:'3.0',site:'susenergetica.co.zw/crediconnect',clients,loans,repayments,expenses};
+  const data={exportedAt:new Date().toISOString(),version:'3.1',site:'susenergetica.co.zw/crediconnect',clients,loans,repayments,expenses};
   const a=document.createElement('a');a.href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(data,null,2));a.download=`crediconnect_backup_${today()}.json`;a.click();
   toast('JSON backup downloaded','success');
 }

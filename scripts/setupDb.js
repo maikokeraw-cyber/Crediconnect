@@ -58,23 +58,28 @@ async function setup() {
     // ── Loans ────────────────────────────────────────────────────
     await client.query(`
       CREATE TABLE IF NOT EXISTS loans (
-        id            VARCHAR(50)    PRIMARY KEY,
-        client_id     VARCHAR(50)    NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
-        amount        NUMERIC(18,2)  NOT NULL,
-        interest_rate NUMERIC(5,2)   NOT NULL,
-        term          INTEGER        NOT NULL,
-        start_date    DATE           NOT NULL,
-        purpose       VARCHAR(500)   NULL,
-        notes         VARCHAR(1000)  NULL,
-        status        VARCHAR(20)    NOT NULL DEFAULT 'active'
-                      CHECK (status IN ('active','completed','defaulted')),
-        added_by      VARCHAR(50)    NULL,
-        created_at    TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
-        updated_at    TIMESTAMPTZ    NOT NULL DEFAULT NOW()
+        id             VARCHAR(50)    PRIMARY KEY,
+        client_id      VARCHAR(50)    NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+        amount         NUMERIC(18,2)  NOT NULL,
+        interest_rate  NUMERIC(5,2)   NOT NULL,
+        term           INTEGER        NOT NULL,
+        term_frequency VARCHAR(10)    NOT NULL DEFAULT 'monthly',
+        start_date     DATE           NOT NULL,
+        purpose        VARCHAR(500)   NULL,
+        notes          VARCHAR(1000)  NULL,
+        admin_fees     NUMERIC(18,2)  NULL DEFAULT 0,
+        status         VARCHAR(20)    NOT NULL DEFAULT 'active'
+                       CHECK (status IN ('active','completed','defaulted')),
+        added_by       VARCHAR(50)    NULL,
+        created_at     TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
+        updated_at     TIMESTAMPTZ    NOT NULL DEFAULT NOW()
       )
     `);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_loans_client_id ON loans(client_id)`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_loans_status    ON loans(status)`);
+    // Add new columns if upgrading from earlier version
+    await client.query(`ALTER TABLE loans ADD COLUMN IF NOT EXISTS term_frequency VARCHAR(10) NOT NULL DEFAULT 'monthly'`);
+    await client.query(`ALTER TABLE loans ADD COLUMN IF NOT EXISTS admin_fees NUMERIC(18,2) NOT NULL DEFAULT 0`);
 
     // ── Repayments ───────────────────────────────────────────────
     await client.query(`
@@ -90,6 +95,8 @@ async function setup() {
     `);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_repayments_loan_id ON repayments(loan_id)`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_repayments_date    ON repayments(date)`);
+    // Safety: ensure updated_at exists on clients
+    await client.query(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
 
     // ── Expenses ─────────────────────────────────────────────────
     await client.query(`

@@ -77,7 +77,7 @@ async function audit(userId, username, action, entity, entityId, detail) {
 
 // ── Row mappers ──────────────────────────────────────────────────
 const mapClient = r => ({ id:r.id, name:r.name, phone:r.phone, nationalId:r.national_id||'', email:r.email||'', address:r.address||'', occupation:r.occupation||'', dob:r.dob?r.dob.toISOString().slice(0,10):'', dateAdded:r.date_added?r.date_added.toISOString().slice(0,10):'', addedBy:r.added_by||'' });
-const mapLoan   = r => ({ id:r.id, clientId:r.client_id, amount:Number(r.amount), interestRate:Number(r.interest_rate), term:Number(r.term), startDate:r.start_date?r.start_date.toISOString().slice(0,10):'', purpose:r.purpose||'', notes:r.notes||'', status:r.status||'active', addedBy:r.added_by||'' });
+const mapLoan   = r => ({ id:r.id, clientId:r.client_id, amount:Number(r.amount), interestRate:Number(r.interest_rate), term:Number(r.term), termFrequency:r.term_frequency||'monthly', startDate:r.start_date?r.start_date.toISOString().slice(0,10):'', purpose:r.purpose||'', notes:r.notes||'', adminFees:Number(r.admin_fees||0), status:r.status||'active', addedBy:r.added_by||'' });
 const mapRepay  = r => ({ id:r.id, loanId:r.loan_id, amount:Number(r.amount), date:r.date?r.date.toISOString().slice(0,10):'', notes:r.notes||'', addedBy:r.added_by||'' });
 const mapExp    = r => ({ id:r.id, amount:Number(r.amount), category:r.category||'', description:r.description||'', date:r.date?r.date.toISOString().slice(0,10):'', addedBy:r.added_by||'' });
 
@@ -220,6 +220,19 @@ app.delete('/api/clients/:id', requireAuth, requireDB, requireRole('admin'), asy
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.put('/api/clients/:id', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
+  try {
+    const { name, phone, nationalId, email, address, occupation, dob } = req.body;
+    if (!name || !phone) return res.status(400).json({ error: 'Name and phone required' });
+    await pool.query(
+      `UPDATE clients SET name=$1,phone=$2,national_id=$3,email=$4,address=$5,occupation=$6,dob=$7,updated_at=NOW() WHERE id=$8`,
+      [name, phone, nationalId||null, email||null, address||null, occupation||null, dob||null, req.params.id]
+    );
+    await audit(req.user.id, req.user.username, 'EDIT_CLIENT', 'Client', req.params.id, `Updated ${name}`);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ================================================================
 //  LOANS
 // ================================================================
@@ -232,15 +245,15 @@ app.get('/api/loans', requireAuth, requireDB, async (req, res) => {
 
 app.post('/api/loans', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
   try {
-    const { clientId, amount, interestRate, term, startDate, purpose, notes } = req.body;
+    const { clientId, amount, interestRate, term, termFrequency, startDate, purpose, notes, adminFees } = req.body;
     if (!clientId || !amount || !interestRate || !term || !startDate) return res.status(400).json({ error: 'Missing required fields' });
     const id = uuidv4();
     await pool.query(
-      `INSERT INTO loans (id,client_id,amount,interest_rate,term,start_date,purpose,notes,added_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [id, clientId, amount, interestRate, term, startDate, purpose||null, notes||null, req.user.id]
+      `INSERT INTO loans (id,client_id,amount,interest_rate,term,term_frequency,start_date,purpose,notes,admin_fees,added_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [id, clientId, amount, interestRate, term, termFrequency||'monthly', startDate, purpose||null, notes||null, adminFees||0, req.user.id]
     );
-    await audit(req.user.id, req.user.username, 'DISBURSE_LOAN', 'Loan', id, `$${amount} to ${clientId}`);
+    await audit(req.user.id, req.user.username, 'DISBURSE_LOAN', 'Loan', id, `$${amount} to ${clientId}${adminFees>0?' +$'+adminFees+' admin fee':''}`);
     const { rows } = await pool.query('SELECT * FROM loans WHERE id=$1', [id]);
     res.status(201).json(mapLoan(rows[0]));
   } catch (err) { res.status(500).json({ error: err.message }); }
