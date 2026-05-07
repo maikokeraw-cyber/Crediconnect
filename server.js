@@ -77,7 +77,26 @@ async function audit(userId, username, action, entity, entityId, detail) {
 
 // ── Row mappers ──────────────────────────────────────────────────
 const mapClient = r => ({ id:r.id, name:r.name, phone:r.phone, nationalId:r.national_id||'', email:r.email||'', address:r.address||'', occupation:r.occupation||'', dob:r.dob?r.dob.toISOString().slice(0,10):'', dateAdded:r.date_added?r.date_added.toISOString().slice(0,10):'', addedBy:r.added_by||'' });
-const mapLoan   = r => ({ id:r.id, clientId:r.client_id, amount:Number(r.amount), interestRate:Number(r.interest_rate), term:Number(r.term), termFrequency:r.term_frequency||'monthly', startDate:r.start_date?r.start_date.toISOString().slice(0,10):'', purpose:r.purpose||'', notes:r.notes||'', adminFees:Number(r.admin_fees||0), status:r.status||'active', addedBy:r.added_by||'' });
+const mapLoan = (r, totalPaid) => {
+  const amount      = Number(r.amount);
+  const rate        = Number(r.interest_rate);
+  const totalOwed   = amount + amount * rate / 100;
+  const paid        = totalPaid !== undefined ? totalPaid : Number(r.total_paid || 0);
+  let computedStatus = r.status || 'active';
+  if (computedStatus !== 'defaulted') {
+    computedStatus = paid >= totalOwed - 0.005 ? 'completed' : 'active';
+  }
+  return {
+    id: r.id, clientId: r.client_id, amount, interestRate: rate,
+    term: Number(r.term), termFrequency: r.term_frequency || 'monthly',
+    startDate: r.start_date ? r.start_date.toISOString().slice(0,10) : '',
+    purpose: r.purpose || '', notes: r.notes || '',
+    adminFees: Number(r.admin_fees || 0),
+    adminFeesStatus: r.admin_fees_status || 'none',
+    status: computedStatus, addedBy: r.added_by || ''
+  };
+};
+const mapAdminFee = r => ({ id:r.id, loanId:r.loan_id, amount:Number(r.amount), date:r.date?r.date.toISOString().slice(0,10):'', notes:r.notes||'', addedBy:r.added_by||'' });
 const mapRepay  = r => ({ id:r.id, loanId:r.loan_id, amount:Number(r.amount), date:r.date?r.date.toISOString().slice(0,10):'', notes:r.notes||'', addedBy:r.added_by||'' });
 const mapExp    = r => ({ id:r.id, amount:Number(r.amount), category:r.category||'', description:r.description||'', date:r.date?r.date.toISOString().slice(0,10):'', addedBy:r.added_by||'' });
 
@@ -238,22 +257,60 @@ app.put('/api/clients/:id', requireAuth, requireDB, requireRole('admin','loan_of
 // ================================================================
 app.get('/api/loans', requireAuth, requireDB, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM loans ORDER BY start_date DESC');
-    res.json(rows.map(mapLoan));
+    // Join with repayments to calculate actual paid amount per loan
+    // This ensures status is always correct regardless of what is stored
+    const { rows } = await pool.query(`
+      SELECT l.*,
+        COALESCE(p.total_paid, 0) AS total_paid
+      FROM loans l
+      LEFT JOIN (
+        SELECT loan_id, SUM(amount) AS total_paid
+        FROM repayments
+        GROUP BY loan_id
+      ) p ON p.loan_id = l.id
+      ORDER BY l.start_date DESC
+    `);
+    // Also fix any wrong statuses in DB silently in the background
+    const fixes = rows.filter(r => {
+      if (r.status === 'defaulted') return false;
+      const owed = Number(r.amount) + Number(r.amount) * Number(r.interest_rate) / 100;
+      const paid = Number(r.total_paid || 0);
+      const shouldBeCompleted = paid >= owed - 0.005;
+      return (shouldBeCompleted && r.status !== 'completed') ||
+             (!shouldBeCompleted && r.status === 'completed');
+    });
+    if (fixes.length > 0) {
+      for (const r of fixes) {
+        const owed = Number(r.amount) + Number(r.amount) * Number(r.interest_rate) / 100;
+        const paid = Number(r.total_paid || 0);
+        const correctStatus = paid >= owed - 0.005 ? 'completed' : 'active';
+        pool.query("UPDATE loans SET status=$1,updated_at=NOW() WHERE id=$2", [correctStatus, r.id]).catch(()=>{});
+      }
+      console.log(`✅ Auto-corrected status for ${fixes.length} loan(s)`);
+    }
+    res.json(rows.map(r => mapLoan(r, Number(r.total_paid || 0))));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/loans', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
   try {
-    const { clientId, amount, interestRate, term, termFrequency, startDate, purpose, notes, adminFees } = req.body;
+    const { clientId, amount, interestRate, term, termFrequency, startDate, purpose, notes, adminFees, adminFeesPaid } = req.body;
     if (!clientId || !amount || !interestRate || !term || !startDate) return res.status(400).json({ error: 'Missing required fields' });
     const id = uuidv4();
+    const adminFeesStatus = adminFees > 0 ? (adminFeesPaid ? 'paid' : 'pending') : 'none';
     await pool.query(
-      `INSERT INTO loans (id,client_id,amount,interest_rate,term,term_frequency,start_date,purpose,notes,admin_fees,added_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-      [id, clientId, amount, interestRate, term, termFrequency||'monthly', startDate, purpose||null, notes||null, adminFees||0, req.user.id]
+      `INSERT INTO loans (id,client_id,amount,interest_rate,term,term_frequency,start_date,purpose,notes,admin_fees,admin_fees_status,added_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [id, clientId, amount, interestRate, term, termFrequency||'monthly', startDate, purpose||null, notes||null, adminFees||0, adminFeesStatus, req.user.id]
     );
-    await audit(req.user.id, req.user.username, 'DISBURSE_LOAN', 'Loan', id, `$${amount} to ${clientId}${adminFees>0?' +$'+adminFees+' admin fee':''}`);
+    // If admin fee paid upfront, record it
+    if (adminFees > 0 && adminFeesPaid) {
+      await pool.query(
+        `INSERT INTO admin_fee_payments (id,loan_id,amount,date,notes,added_by) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [uuidv4(), id, adminFees, startDate, 'Paid at disbursement', req.user.id]
+      );
+    }
+    await audit(req.user.id, req.user.username, 'DISBURSE_LOAN', 'Loan', id, `$${amount} to ${clientId}${adminFees>0?' +$'+adminFees+' admin fee ('+adminFeesStatus+')':''}`);
     const { rows } = await pool.query('SELECT * FROM loans WHERE id=$1', [id]);
     res.status(201).json(mapLoan(rows[0]));
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -293,14 +350,17 @@ app.post('/api/repayments', requireAuth, requireDB, requireRole('admin','loan_of
       `INSERT INTO repayments (id,loan_id,amount,date,notes,added_by) VALUES ($1,$2,$3,$4,$5,$6)`,
       [id, loanId, amount, date, notes||null, req.user.id]
     );
-    // Auto-complete loan if fully paid
+    // Always recalculate true status from total paid — never rely on stored status
     const loanRes = await pool.query('SELECT * FROM loans WHERE id=$1', [loanId]);
-    const loan = loanRes.rows[0];
+    const loan    = loanRes.rows[0];
     if (loan) {
       const totalOwed = Number(loan.amount) + Number(loan.amount) * Number(loan.interest_rate) / 100;
-      const paidRes  = await pool.query('SELECT COALESCE(SUM(amount),0) AS paid FROM repayments WHERE loan_id=$1', [loanId]);
-      if (Number(paidRes.rows[0].paid) >= totalOwed)
-        await pool.query("UPDATE loans SET status='completed',updated_at=NOW() WHERE id=$1", [loanId]);
+      const paidRes   = await pool.query('SELECT COALESCE(SUM(amount),0) AS paid FROM repayments WHERE loan_id=$1', [loanId]);
+      const paid      = Number(paidRes.rows[0].paid);
+      const newStatus = loan.status === 'defaulted' ? 'defaulted' : (paid >= totalOwed - 0.005 ? 'completed' : 'active');
+      if (newStatus !== loan.status) {
+        await pool.query('UPDATE loans SET status=$1,updated_at=NOW() WHERE id=$2', [newStatus, loanId]);
+      }
     }
     await audit(req.user.id, req.user.username, 'RECORD_REPAYMENT', 'Repayment', id, `$${amount} for loan ${loanId}`);
     const { rows } = await pool.query('SELECT * FROM repayments WHERE id=$1', [id]);
@@ -310,8 +370,73 @@ app.post('/api/repayments', requireAuth, requireDB, requireRole('admin','loan_of
 
 app.delete('/api/repayments/:id', requireAuth, requireDB, requireRole('admin'), async (req, res) => {
   try {
+    // Get loan id before deleting
+    const repRes = await pool.query('SELECT loan_id FROM repayments WHERE id=$1', [req.params.id]);
+    const loanId = repRes.rows[0]?.loan_id;
     await pool.query('DELETE FROM repayments WHERE id=$1', [req.params.id]);
+    // Recalculate loan status after deletion
+    if (loanId) {
+      const loanRes = await pool.query('SELECT * FROM loans WHERE id=$1', [loanId]);
+      const loan    = loanRes.rows[0];
+      if (loan && loan.status !== 'defaulted') {
+        const totalOwed = Number(loan.amount) + Number(loan.amount) * Number(loan.interest_rate) / 100;
+        const paidRes   = await pool.query('SELECT COALESCE(SUM(amount),0) AS paid FROM repayments WHERE loan_id=$1', [loanId]);
+        const paid      = Number(paidRes.rows[0].paid);
+        const newStatus = paid >= totalOwed - 0.005 ? 'completed' : 'active';
+        if (newStatus !== loan.status)
+          await pool.query('UPDATE loans SET status=$1,updated_at=NOW() WHERE id=$2', [newStatus, loanId]);
+      }
+    }
     await audit(req.user.id, req.user.username, 'DELETE_REPAYMENT', 'Repayment', req.params.id, '');
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ================================================================
+//  ADMIN FEE PAYMENTS
+// ================================================================
+app.get('/api/admin-fees', requireAuth, requireDB, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT af.*, l.amount AS loan_amount, l.client_id,
+             c.name AS client_name
+      FROM admin_fee_payments af
+      JOIN loans l ON l.id = af.loan_id
+      JOIN clients c ON c.id = l.client_id
+      ORDER BY af.date DESC
+    `);
+    res.json(rows.map(r => ({
+      ...mapAdminFee(r),
+      loanAmount: Number(r.loan_amount),
+      clientId: r.client_id,
+      clientName: r.client_name
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/admin-fees', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
+  try {
+    const { loanId, amount, date, notes } = req.body;
+    if (!loanId || !amount || !date) return res.status(400).json({ error: 'loanId, amount and date required' });
+    const id = uuidv4();
+    await pool.query(
+      `INSERT INTO admin_fee_payments (id,loan_id,amount,date,notes,added_by) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [id, loanId, amount, date, notes||null, req.user.id]
+    );
+    await pool.query(`UPDATE loans SET admin_fees_status='paid',updated_at=NOW() WHERE id=$1`, [loanId]);
+    await audit(req.user.id, req.user.username, 'RECORD_ADMIN_FEE', 'AdminFee', id, `$${amount} for loan ${loanId}`);
+    const { rows } = await pool.query('SELECT * FROM admin_fee_payments WHERE id=$1', [id]);
+    res.status(201).json(mapAdminFee(rows[0]));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/admin-fees/:id', requireAuth, requireDB, requireRole('admin'), async (req, res) => {
+  try {
+    const rep = await pool.query('SELECT loan_id FROM admin_fee_payments WHERE id=$1', [req.params.id]);
+    const loanId = rep.rows[0]?.loan_id;
+    await pool.query('DELETE FROM admin_fee_payments WHERE id=$1', [req.params.id]);
+    if (loanId) await pool.query(`UPDATE loans SET admin_fees_status='pending',updated_at=NOW() WHERE id=$1`, [loanId]);
+    await audit(req.user.id, req.user.username, 'DELETE_ADMIN_FEE', 'AdminFee', req.params.id, '');
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

@@ -216,7 +216,7 @@ input::placeholder{color:var(--text3)}
     <div class="login-fg"><label>Username</label><input class="login-inp" id="lUser" placeholder="Enter username" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()"></div>
     <div class="login-fg"><label>Password</label><input class="login-inp" id="lPass" type="password" placeholder="Enter password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
     <button class="login-btn" id="loginBtn" onclick="doLogin()">Sign In</button>
-    <div class="login-footer">Default: <strong style="color:var(--gold2)">admin</strong> / <strong style="color:var(--gold2)">Admin@1234</strong></div>
+    <div class="login-footer">Contact your administrator for login details</div>
   </div>
 </div>
 
@@ -341,6 +341,7 @@ input::placeholder{color:var(--text3)}
     <div class="form-group"><label>Disbursement Date *</label><input id="fLD" type="date"></div>
     <div class="form-group"><label>Purpose</label><input id="fLP" placeholder="Business, Agriculture…"></div>
     <div class="form-group"><label>Admin Fees <span style="font-size:10px;color:var(--text3)">(optional)</span></label><input id="fLAF" type="number" placeholder="0.00" step="0.01"></div>
+    <div class="form-group" style="justify-content:flex-end;padding-top:22px"><label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:13px;cursor:pointer"><input type="checkbox" id="fLAFPaid" style="width:16px;height:16px;flex-shrink:0"> Paid upfront</label></div>
     <div class="form-group full"><label>Notes</label><textarea id="fLN" placeholder="Additional notes…"></textarea></div>
   </div>
   <div id="loanPreview" style="display:none;margin-top:12px;padding:12px;background:var(--surface);border-radius:var(--radius-sm);font-size:12.5px;color:var(--text2)">
@@ -411,7 +412,7 @@ input::placeholder{color:var(--text3)}
 const K = {
   clients:'cc_clients', loans:'cc_loans', repayments:'cc_repayments',
   expenses:'cc_expenses', users:'cc_users', audit:'cc_audit',
-  session:'cc_session'
+  session:'cc_session', adminFees:'cc_admin_fees'
 };
 
 // ================================================================
@@ -425,7 +426,8 @@ let USE_DB      = false;
 let clients    = lsGet(K.clients,   []);
 let loans      = lsGet(K.loans,     []);
 let repayments = lsGet(K.repayments,[]);
-let expenses   = lsGet(K.expenses,  []);
+let expenses         = lsGet(K.expenses,  []);
+let adminFeePayments = lsGet(K.adminFees, []);
 let users      = lsGet(K.users,     []);
 let auditLog   = lsGet(K.audit,     []);
 
@@ -434,7 +436,7 @@ function lsSet(k,v){ localStorage.setItem(k,JSON.stringify(v)); }
 function saveAll(){
   lsSet(K.clients,clients); lsSet(K.loans,loans);
   lsSet(K.repayments,repayments); lsSet(K.expenses,expenses);
-  lsSet(K.users,users);
+  lsSet(K.adminFees,adminFeePayments); lsSet(K.users,users);
 }
 
 // ================================================================
@@ -621,6 +623,18 @@ async function deleteExpenseData(id) {
   if (USE_DB) await apiFetch('DELETE',`/api/expenses/${id}`);
   expenses=expenses.filter(e=>e.id!==id); saveAll();
 }
+async function addAdminFeePayment(data) {
+  if (USE_DB) { const r=await apiFetch('POST','/api/admin-fees',data); adminFeePayments.push(r); saveAll(); return r; }
+  const r={...data,id:uid(),addedBy:currentUser.username}; adminFeePayments.push(r);
+  const loan=loans.find(l=>l.id===data.loanId); if(loan) loan.adminFeesStatus='paid';
+  saveAll(); return r;
+}
+async function deleteAdminFeePayment(id) {
+  if (USE_DB) await apiFetch('DELETE',`/api/admin-fees/${id}`);
+  const af=adminFeePayments.find(a=>a.id===id);
+  if(af){ const loan=loans.find(l=>l.id===af.loanId); if(loan) loan.adminFeesStatus='pending'; }
+  adminFeePayments=adminFeePayments.filter(a=>a.id!==id); saveAll();
+}
 
 // ================================================================
 //  HELPERS
@@ -761,7 +775,7 @@ function renderDashboard(){
       </div>
       <div class="card"><div class="card-header"><span class="card-title">Cash Summary</span></div><div class="card-body">
         <div style="display:flex;flex-direction:column;gap:10px">
-          ${[['Total Capital Deployed','$'+fmt(td),'var(--gold2)'],['Total Repayments Received','$'+fmt(tc),'var(--green)'],['Total Operating Expenses','-$'+fmt(te),'var(--red)'],['Cash In Hand','$'+fmt(tc-te),tc-te>=0?'var(--green)':'var(--red)'],['Outstanding Balance','$'+fmt(to),'var(--amber)']].map(([l,v,c])=>`
+          ${[['Total Capital Deployed','$'+fmt(td),'var(--gold2)'],['Total Repayments Received','$'+fmt(tc),'var(--green)'],['Admin Fees Collected','$'+fmt(adminFeePayments.reduce((s,a)=>s+a.amount,0)),'var(--gold2)'],['Total Operating Expenses','-$'+fmt(te),'var(--red)'],['Cash In Hand','$'+fmt(tc+adminFeePayments.reduce((s,a)=>s+a.amount,0)-te),(tc+adminFeePayments.reduce((s,a)=>s+a.amount,0)-te)>=0?'var(--green)':'var(--red)'],['Outstanding Balance','$'+fmt(to),'var(--amber)']].map(([l,v,c])=>`
             <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--surface);border-radius:var(--radius-sm);border:1px solid var(--border)">
               <span style="font-size:13px;color:var(--text2)">${l}</span>
               <span style="font-weight:700;font-family:'DM Mono',monospace;color:${c}">${v}</span>
@@ -926,14 +940,20 @@ function updateLoanPreview(){
 function saveLoan(){
   const clientId=document.getElementById('fLC').value,amount=parseFloat(document.getElementById('fLA').value),rate=parseFloat(document.getElementById('fLR').value),term=parseInt(document.getElementById('fLT').value),date=document.getElementById('fLD').value,freq=document.getElementById('fLF').value;
   const adminFees=parseFloat(document.getElementById('fLAF').value)||0;
+  const adminFeesPaid=document.getElementById('fLAFPaid').checked;
   if(!clientId||!amount||!rate||!term||!date)return toast('Please fill all required fields','error');
-  addLoan({clientId,amount,interestRate:rate,term,termFrequency:freq,startDate:date,purpose:document.getElementById('fLP').value.trim(),notes:document.getElementById('fLN').value.trim(),adminFees}).then(r=>{
-    if(adminFees>0){
+  if(adminFees>0&&!adminFeesPaid){
+    if(!confirm('Admin fee of $'+fmt(adminFees)+' is not marked as paid.\n\nThe loan will be disbursed with admin fee recorded as PENDING.\n\nProceed?')) return;
+  }
+  addLoan({clientId,amount,interestRate:rate,term,termFrequency:freq,startDate:date,purpose:document.getElementById('fLP').value.trim(),notes:document.getElementById('fLN').value.trim(),adminFees,adminFeesPaid}).then(r=>{
+    if(adminFees>0&&adminFeesPaid&&!USE_DB){
       const c=clients.find(c=>c.id===clientId);
-      addExpenseData({amount:adminFees,category:'Bank Charges',description:`Admin fees — loan to ${c?c.name:'client'} ($${fmt(amount)})`,date}).then(()=>{}).catch(()=>{});
+      adminFeePayments.push({id:uid(),loanId:r.id,amount:adminFees,date,notes:'Paid at disbursement',addedBy:currentUser.username,clientName:c?c.name:'',loanAmount:amount});
+      const loan=loans.find(l=>l.id===r.id); if(loan){loan.adminFeesStatus='paid';} saveAll();
     }
-    addAudit('DISBURSE_LOAN','Loan',r.id,`$${amount} disbursed${adminFees>0?' + $'+fmt(adminFees)+' admin fee':''}`);
-    CM('mAddLoan');renderLoans();updateStorageInfo();toast('Loan disbursed'+(adminFees>0?` — admin fee $${fmt(adminFees)} recorded`:''),'success');
+    addAudit('DISBURSE_LOAN','Loan',r.id,'$'+amount+' disbursed'+(adminFees>0?' +$'+fmt(adminFees)+' admin fee ('+(adminFeesPaid?'paid':'pending')+')':''));
+    CM('mAddLoan');renderLoans();updateStorageInfo();
+    toast('Loan disbursed'+(adminFees>0?' - admin fee $'+fmt(adminFees)+' '+(adminFeesPaid?'paid':'PENDING'):''),'success');
   }).catch(e=>toast('Error: '+e.message,'error'));
 }
 
@@ -1070,31 +1090,38 @@ function deleteLoan(id){
 function renderRepayments(){
   const q=(document.getElementById('repaySearch')?.value||'').toLowerCase(),lf=document.getElementById('repayLoanFilter')?.value||'';
   const sel=document.getElementById('repayLoanFilter'),cur=sel.value;
-  sel.innerHTML='<option value="">All Loans</option>'+loans.map(l=>{const c=clients.find(c=>c.id===l.clientId);return`<option value="${l.id}">${c?c.name:'?'} — $${fmt(l.amount)} (${l.status})</option>`;}).join('');
+  sel.innerHTML='<option value="">All Loans</option>'+loans.map(l=>{const c=clients.find(c=>c.id===l.clientId);return`<option value="${l.id}">${c?c.name:'?'} -- $${fmt(l.amount)} (${getLoanStatus(l)})</option>`;}).join('');
   sel.value=cur;
   let data=repayments.filter(r=>{const lo=loans.find(l=>l.id===r.loanId),c=lo?clients.find(c=>c.id===lo.clientId):null;return(!q||((c?.name||'').toLowerCase().includes(q)))&&(!lf||r.loanId===lf);}).sort((a,b)=>b.date.localeCompare(a.date));
   const tp=data.reduce((s,r)=>s+r.amount,0);
-  document.getElementById('repaySummary').innerHTML=`<div class="sum-item"><div class="sum-label">Total Shown</div><div class="sum-val" style="color:var(--gold2)">$${fmt(tp)}</div></div><div class="sum-item"><div class="sum-label">Transactions</div><div class="sum-val">${data.length}</div></div><div class="sum-item"><div class="sum-label">Avg Payment</div><div class="sum-val">$${data.length?fmt(tp/data.length):'0.00'}</div></div><div class="sum-item"><div class="sum-label">Last Payment</div><div class="sum-val" style="font-size:14px;font-family:'DM Sans'">${data[0]?fmtDate(data[0].date):'—'}</div></div>`;
+  const afPaid=adminFeePayments.filter(a=>(!lf||a.loanId===lf));
+  const afPaidTotal=afPaid.reduce((s,a)=>s+a.amount,0);
+  const pendingAF=loans.filter(l=>l.adminFees>0&&l.adminFeesStatus==='pending'&&(!lf||l.id===lf));
+  const pendingAFTotal=pendingAF.reduce((s,l)=>s+l.adminFees,0);
+  document.getElementById('repaySummary').innerHTML=`<div class="sum-item"><div class="sum-label">Repayments</div><div class="sum-val" style="color:var(--green)">$${fmt(tp)}</div></div><div class="sum-item"><div class="sum-label">Admin Fees Collected</div><div class="sum-val" style="color:var(--gold2)">$${fmt(afPaidTotal)}</div></div><div class="sum-item"><div class="sum-label">Pending Admin Fees</div><div class="sum-val" style="color:var(--amber)">${pendingAFTotal>0?'$'+fmt(pendingAFTotal):'None'}</div></div><div class="sum-item"><div class="sum-label">Last Payment</div><div class="sum-val" style="font-size:14px">${data[0]?fmtDate(data[0].date):'--'}</div></div>`;
   const tb=document.getElementById('repayTbody');
-  if(!data.length){tb.innerHTML=`<tr><td colspan="7"><div class="empty-state"><div class="emoji">💳</div><p>No payments found</p></div></td></tr>`;return;}
-  tb.innerHTML=data.map(r=>{
+  const pendingRows=pendingAF.map(l=>{const c=clients.find(c=>c.id===l.clientId);const av=c?`<div class="name-cell"><div class="avatar" style="background:${avatarColor(c.name)};width:24px;height:24px;font-size:10px">${initials(c.name)}</div>${c.name}</div>`:'--';return `<tr style="background:rgba(240,168,50,0.06)"><td style="color:var(--amber);font-size:12px">Pending</td><td>${av}</td><td style="font-family:'DM Mono',monospace;font-size:11px">...${l.id.slice(-6)}</td><td style="color:var(--amber);font-weight:600">$${fmt(l.adminFees)}</td><td><span style="background:var(--amber-dim);color:var(--amber);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Admin Fee</span></td><td style="color:var(--amber);font-size:12px">Not yet paid</td><td onclick="event.stopPropagation()">${can('write')?`<button class="btn btn-success btn-sm" onclick="openAddRepayForLoan('${l.id}')">Collect</button>`:''}</td></tr>`;});
+  const afPaidRows=afPaid.sort((a,b)=>b.date.localeCompare(a.date)).map(a=>{const lo=loans.find(l=>l.id===a.loanId),c=lo?clients.find(c=>c.id===lo.clientId):null;const av=c?`<div class="name-cell"><div class="avatar" style="background:${avatarColor(c.name)};width:24px;height:24px;font-size:10px">${initials(c.name)}</div>${c.name}</div>`:'--';return `<tr style="background:rgba(201,149,42,0.05)"><td class="primary">${fmtDate(a.date)}</td><td>${av}</td><td style="font-family:'DM Mono',monospace;font-size:11px">...${a.loanId.slice(-6)}</td><td style="color:var(--gold2);font-weight:600">+$${fmt(a.amount)}</td><td><span style="background:var(--gold-dim);color:var(--gold2);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Admin Fee</span></td><td style="color:var(--text2);font-size:12px">${a.notes||'--'}</td><td onclick="event.stopPropagation()">${can('delete')?`<button class="btn btn-danger btn-sm" onclick="handleDeleteAdminFee('${a.id}')">Delete</button>`:''}</td></tr>`;});
+  if(!data.length&&!pendingRows.length&&!afPaidRows.length){tb.innerHTML=`<tr><td colspan="7"><div class="empty-state"><div class="emoji">&#x1F4B3;</div><p>No payments found</p></div></td></tr>`;return;}
+  tb.innerHTML=pendingRows.join('')+afPaidRows.join('')+data.map(r=>{
     const lo=loans.find(l=>l.id===r.loanId),c=lo?clients.find(c=>c.id===lo.clientId):null;
     const allP=repayments.filter(rp=>rp.loanId===r.loanId).sort((a,b)=>a.date.localeCompare(b.date));
     const cumPaid=allP.slice(0,allP.findIndex(rp=>rp.id===r.id)+1).reduce((s,p)=>s+p.amount,0);
     const balAfter=lo?Math.max(0,getLoanTotal(lo)-cumPaid):0;
     return `<tr><td class="primary">${fmtDate(r.date)}</td>
-      <td>${c?`<div class="name-cell"><div class="avatar" style="background:${avatarColor(c.name)};width:24px;height:24px;font-size:10px">${initials(c.name)}</div>${c.name}</div>`:'—'}</td>
-      <td style="font-family:'DM Mono',monospace;font-size:11px">…${r.loanId.slice(-6)}</td>
+      <td>${c?`<div class="name-cell"><div class="avatar" style="background:${avatarColor(c.name)};width:24px;height:24px;font-size:10px">${initials(c.name)}</div>${c.name}</div>`:'--'}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:11px">...${r.loanId.slice(-6)}</td>
       <td style="color:var(--green);font-weight:600;font-family:'DM Mono',monospace">+$${fmt(r.amount)}</td>
-      <td style="font-family:'DM Mono',monospace;color:${balAfter>0?'var(--amber)':'var(--green)'}">$${fmt(balAfter)}</td>
-      <td style="color:var(--text2);font-size:12px">${r.notes||'—'}</td>
+      <td style="font-family:'DM Mono',monospace;color:${balAfter>0?'var(--amber)':'var(--green)'}">${fmt(balAfter)}</td>
+      <td style="color:var(--text2);font-size:12px">${r.notes||'--'}</td>
       <td onclick="event.stopPropagation()">${can('delete')?`<button class="btn btn-danger btn-sm" onclick="deleteRepayment('${r.id}')">Delete</button>`:''}</td>
     </tr>`;
   }).join('');
 }
 function openAddRepay(preselect){
   const al=loans.filter(l=>l.status==='active'),sel=document.getElementById('fRL');
-  sel.innerHTML='<option value="">— Select Active Loan —</option>'+al.map(l=>{const c=clients.find(c=>c.id===l.clientId);return`<option value="${l.id}">${c?c.name:'?'} — $${fmt(l.amount)} (Bal: $${fmt(getLoanBalance(l.id))})</option>`;}).join('');
+  sel.innerHTML='<option value="">-- Select Active Loan --</option>'+al.map(l=>{const c=clients.find(c=>c.id===l.clientId);const afW=l.adminFees>0&&l.adminFeesStatus==='pending'?' [Admin Fee $'+fmt(l.adminFees)+' PENDING]':'';
+  return`<option value="${l.id}">${c?c.name:'?'} - $${fmt(l.amount)}${afW}</option>`;}).join('');
   if(preselect)sel.value=preselect;
   document.getElementById('fRA').value='';document.getElementById('fRN').value='';document.getElementById('fRD').value=today();
   document.getElementById('fRInfo').style.display='none';
@@ -1106,17 +1133,47 @@ function updateRepayInfo(){
   const id=document.getElementById('fRL').value,info=document.getElementById('fRInfo');
   if(!id){info.style.display='none';return;}
   const loan=loans.find(l=>l.id===id),c=loan?clients.find(c=>c.id===loan.clientId):null;
-  const bal=getLoanBalance(id),monthly=getLoanTotal(loan)/loan.term;
+  const bal=getLoanBalance(id),periodic=getLoanTotal(loan)/loan.term;
+  const hasAF=loan.adminFees>0&&loan.adminFeesStatus==='pending';
   info.style.display='block';
-  info.innerHTML=`<strong style="color:var(--text)">${c?.name}</strong> · $${fmt(loan.amount)} @ ${loan.interestRate}% · Outstanding: <strong style="color:var(--red)">$${fmt(bal)}</strong> · Suggested: <strong style="color:var(--green)">$${fmt(monthly)}</strong>`;
-  document.getElementById('fRA').value=Math.round(monthly);
+  info.innerHTML='<strong style="color:var(--text)">'+(c?.name||'')+'</strong> $'+fmt(loan.amount)+' @ '+loan.interestRate+'% Balance: <strong style="color:var(--red)">$'+fmt(bal)+'</strong> Suggested: <strong style="color:var(--green)">$'+fmt(periodic)+'</strong>'+(hasAF?'<br><span style="color:var(--amber)">&#9888; Admin fee <strong>$'+fmt(loan.adminFees)+'</strong> outstanding - first payment will be split</span>':'');
+  document.getElementById('fRA').value=Math.round(periodic+(hasAF?loan.adminFees:0));
 }
-function saveRepay(){
+async function saveRepay(){
   const loanId=document.getElementById('fRL').value,amount=parseFloat(document.getElementById('fRA').value),date=document.getElementById('fRD').value;
   if(!loanId||!amount||!date)return toast('Please fill all required fields','error');
+  const loan=loans.find(l=>l.id===loanId);
+  if(!loan) return toast('Loan not found','error');
+  const hasUnpaidAF=loan.adminFees>0&&loan.adminFeesStatus==='pending';
+  if(hasUnpaidAF){
+    const adminFee=loan.adminFees;
+    if(amount<=adminFee){
+      if(!confirm('Admin Fee Outstanding: $'+fmt(adminFee)+'\n\nThis payment of $'+fmt(amount)+' will go entirely to the admin fee.\n\nConfirm?')) return;
+      await addAdminFeePayment({loanId,amount,date,notes:'Partial admin fee payment'});
+      if(amount>=adminFee-0.005){const l2=loans.find(l=>l.id===loanId);if(l2)l2.adminFeesStatus='paid';saveAll();}
+      addAudit('RECORD_ADMIN_FEE','AdminFee',loanId,'$'+amount+' partial admin fee');
+      CM('mAddRepay');renderRepayments();updateStorageInfo();
+      toast('$'+fmt(amount)+' recorded as admin fee payment','success');
+      return;
+    }
+    const loanPortion=amount-adminFee;
+    if(!confirm('Admin Fee Outstanding: $'+fmt(adminFee)+'\n\nThis payment will be split:\n  $'+fmt(adminFee)+' to Admin Fee (cleared)\n  $'+fmt(loanPortion)+' to Loan Repayment\n\nConfirm split?')) return;
+    try{
+      await addAdminFeePayment({loanId,amount:adminFee,date,notes:'Paid via first repayment'});
+      if(loanPortion>0.005){
+        const r=await addRepayment({loanId,amount:loanPortion,date,notes:'Split - admin fee $'+fmt(adminFee)+' deducted'});
+        if(!repayments.find(rp=>rp.id===r.id)){repayments.push(r);const l2=loans.find(l=>l.id===loanId);if(l2&&getLoanBalance(loanId)<=0)l2.status='completed';saveAll();}
+        addAudit('RECORD_REPAYMENT','Repayment',r.id,'Split: $'+fmt(adminFee)+' admin + $'+fmt(loanPortion)+' loan');
+      }
+      CM('mAddRepay');renderRepayments();updateStorageInfo();
+      toast('Split: $'+fmt(adminFee)+' admin fee + $'+fmt(loanPortion)+' loan repayment','success');
+    }catch(e){toast('Error: '+e.message,'error');}
+    return;
+  }
   addRepayment({loanId,amount,date,notes:document.getElementById('fRN').value.trim()}).then(r=>{
-    addAudit('RECORD_REPAYMENT','Repayment',r.id,`$${amount}`);
-    CM('mAddRepay');renderRepayments();updateStorageInfo();toast(`Payment of $${fmt(amount)} recorded`,'success');
+    if(!repayments.find(rp=>rp.id===r.id)){repayments.push(r);const l2=loans.find(l=>l.id===loanId);if(l2&&getLoanBalance(loanId)<=0)l2.status='completed';saveAll();}
+    addAudit('RECORD_REPAYMENT','Repayment',r.id,'$'+amount);
+    CM('mAddRepay');renderRepayments();updateStorageInfo();toast('Payment of $'+fmt(amount)+' recorded','success');
   }).catch(e=>toast('Error: '+e.message,'error'));
 }
 function deleteRepayment(id){
@@ -1125,6 +1182,14 @@ function deleteRepayment(id){
     addAudit('DELETE_REPAYMENT','Repayment',id,'Deleted');
     renderRepayments();updateStorageInfo();toast('Payment deleted','success');
   }).catch(e=>toast('Error: '+e.message,'error'));
+}
+async function handleDeleteAdminFee(id){
+  if(!confirm('Delete this admin fee payment?')) return;
+  try{
+    await deleteAdminFeePayment(id);
+    addAudit('DELETE_ADMIN_FEE','AdminFee',id,'Deleted');
+    renderRepayments();updateStorageInfo();toast('Admin fee payment deleted','success');
+  }catch(e){toast('Error: '+e.message,'error');}
 }
 
 // ================================================================
@@ -1191,15 +1256,17 @@ function renderFinancials(){
   if(!can('admin')){document.getElementById('finContent').innerHTML=permDenied('Financial Overview is for Administrators only.');return;}
   const td=loans.reduce((s,l)=>s+l.amount,0),ti=loans.reduce((s,l)=>s+(l.amount*l.interestRate/100),0);
   const tc=repayments.reduce((s,r)=>s+r.amount,0),te=expenses.reduce((s,e)=>s+e.amount,0);
-  const al=loans.filter(l=>l.status==='active'),to=al.reduce((s,l)=>s+getLoanBalance(l.id),0);
-  const cashInHand=tc-te,netProfit=tc-td-te+to,roi=td>0?((ti/td)*100).toFixed(1):0;
+  const taf=adminFeePayments.reduce((s,a)=>s+a.amount,0);
+  const pendingAFTotal=loans.filter(l=>l.adminFees>0&&l.adminFeesStatus==='pending').reduce((s,l)=>s+l.adminFees,0);
+  const al=loans.filter(l=>l.status==='active'||getLoanStatus(l)==='active'),to=al.reduce((s,l)=>s+getLoanBalance(l.id),0);
+  const cashInHand=tc+taf-te,netProfit=tc+taf-td-te+to,roi=td>0?((ti/td)*100).toFixed(1):0;
   const catMap={};expenses.forEach(e=>{catMap[e.category]=(catMap[e.category]||0)+e.amount;});
   const catSorted=Object.entries(catMap).sort((a,b)=>b[1]-a[1]);
   const ml=[],mIn=[],mOut=[];
   for(let i=5;i>=0;i--){const d=new Date();d.setMonth(d.getMonth()-i);const ms=d.toISOString().slice(0,7);ml.push(d.toLocaleString('en',{month:'short'}));mIn.push(repayments.filter(r=>r.date.startsWith(ms)).reduce((s,r)=>s+r.amount,0));mOut.push(expenses.filter(e=>e.date.startsWith(ms)).reduce((s,e)=>s+e.amount,0));}
   document.getElementById('finContent').innerHTML=`
     <div class="stats-grid">
-      <div class="stat-card green"><span class="stat-icon">💵</span><div class="stat-label">Cash In Hand</div><div class="stat-value" style="color:${cashInHand>=0?'var(--green)':'var(--red)'}">$${fmt(Math.abs(cashInHand))}</div><div class="stat-sub">Collections minus expenses</div></div>
+      <div class="stat-card green"><span class="stat-icon">💵</span><div class="stat-label">Cash In Hand</div><div class="stat-value" style="color:${cashInHand>=0?'var(--green)':'var(--red)'}">$${fmt(Math.abs(cashInHand))}</div><div class="stat-sub">Repayments + admin fees - expenses</div></div>
       <div class="stat-card gold"><span class="stat-icon">📥</span><div class="stat-label">Total Collected</div><div class="stat-value">$${fmt(tc)}</div><div class="stat-sub">${repayments.length} repayments</div></div>
       <div class="stat-card red"><span class="stat-icon">🧾</span><div class="stat-label">Total Expenses</div><div class="stat-value" style="color:var(--red)">$${fmt(te)}</div><div class="stat-sub">${expenses.length} entries</div></div>
       <div class="stat-card blue"><span class="stat-icon">📊</span><div class="stat-label">Outstanding Loans</div><div class="stat-value">$${fmt(to)}</div><div class="stat-sub">${al.length} active</div></div>
@@ -1227,6 +1294,8 @@ function renderFinancials(){
           <tbody>
             <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 16px;font-weight:700;color:var(--text)">INFLOWS</td><td></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 16px 8px 32px;color:var(--text2)">Total Loan Repayments Received</td><td style="text-align:right;padding:8px 16px;color:var(--green);font-family:'DM Mono',monospace;font-weight:600">+ $${fmt(tc)}</td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 16px 8px 32px;color:var(--text2)">Admin Fees Collected</td><td style="text-align:right;padding:8px 16px;color:var(--gold2);font-family:'DM Mono',monospace;font-weight:600">+ $${fmt(taf)}</td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 16px 8px 32px;color:var(--text3);font-size:12px">Pending Admin Fees (to collect)</td><td style="text-align:right;padding:8px 16px;color:var(--amber);font-family:'DM Mono',monospace;font-size:12px">+ $${fmt(pendingAFTotal)}</td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 16px 8px 32px;color:var(--text3);font-size:12px">Outstanding (still to collect)</td><td style="text-align:right;padding:8px 16px;color:var(--amber);font-family:'DM Mono',monospace;font-size:12px">+ $${fmt(to)}</td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 16px;font-weight:700;color:var(--text)">OUTFLOWS</td><td></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 16px 8px 32px;color:var(--text2)">Total Capital Disbursed (Loans)</td><td style="text-align:right;padding:8px 16px;color:var(--red);font-family:'DM Mono',monospace;font-weight:600">- $${fmt(td)}</td></tr>
@@ -1253,6 +1322,32 @@ function renderReports(){
   const tc=repayments.reduce((s,r)=>s+r.amount,0),al=loans.filter(l=>l.status==='active');
   const to=al.reduce((s,l)=>s+getLoanBalance(l.id),0),par=td>0?(to/td*100).toFixed(1):0;
   document.getElementById('repContent').innerHTML=`
+    <!-- Admin Fees Section -->
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:22px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:14px">Admin Fees Overview</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
+        ${(()=>{
+          const thisM=new Date().toISOString().slice(0,7);
+          const lastMD=new Date();lastMD.setMonth(lastMD.getMonth()-1);const lastM=lastMD.toISOString().slice(0,7);
+          const thisMonthAF=adminFeePayments.filter(a=>a.date.startsWith(thisM)).reduce((s,a)=>s+a.amount,0);
+          const lastMonthAF=adminFeePayments.filter(a=>a.date.startsWith(lastM)).reduce((s,a)=>s+a.amount,0);
+          const totalAF=adminFeePayments.reduce((s,a)=>s+a.amount,0);
+          const pendingAF=loans.filter(l=>l.adminFees>0&&l.adminFeesStatus==='pending').reduce((s,l)=>s+l.adminFees,0);
+          return [
+            ['This Month','$'+fmt(thisMonthAF),'var(--gold2)'],
+            ['Last Month','$'+fmt(lastMonthAF),'var(--text2)'],
+            ['All Time','$'+fmt(totalAF),'var(--green)'],
+            ['Still Pending','$'+fmt(pendingAF),'var(--amber)']
+          ].map(([l,v,c])=>`<div style="background:var(--surface);padding:14px;border-radius:var(--radius-sm);border:1px solid var(--border)"><div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:6px">${l}</div><div style="font-size:20px;font-weight:700;font-family:'DM Mono',monospace;color:${c}">${v}</div></div>`).join('');
+        })()}
+      </div>
+      <div style="margin-top:14px;max-height:180px;overflow-y:auto">
+        <table style="width:100%;font-size:12.5px;border-collapse:collapse">
+          <thead><tr><th style="text-align:left;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px">Date</th><th style="text-align:left;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px">Client</th><th style="text-align:right;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px">Amount</th></tr></thead>
+          <tbody>${adminFeePayments.sort((a,b)=>b.date.localeCompare(a.date)).map(a=>{const lo=loans.find(l=>l.id===a.loanId),c=lo?clients.find(c=>c.id===lo.clientId):null;return`<tr style="border-bottom:1px solid var(--border)"><td style="padding:7px 10px;color:var(--text2)">${fmtDate(a.date)}</td><td style="padding:7px 10px">${c?c.name:'--'}</td><td style="padding:7px 10px;text-align:right;color:var(--gold2);font-family:'DM Mono',monospace">+$${fmt(a.amount)}</td></tr>`;}).join('')||'<tr><td colspan="3" style="padding:14px;text-align:center;color:var(--text3)">No admin fees collected yet</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
     <div class="stats-grid">
       <div class="stat-card gold"><span class="stat-icon">📊</span><div class="stat-label">Loan Book</div><div class="stat-value">$${fmt(td)}</div><div class="stat-sub">${loans.length} loans</div></div>
       <div class="stat-card green"><span class="stat-icon">💵</span><div class="stat-label">Interest Accrued</div><div class="stat-value">$${fmt(ti)}</div><div class="stat-sub">Total interest</div></div>

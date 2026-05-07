@@ -80,6 +80,21 @@ async function setup() {
     // Add new columns if upgrading from earlier version
     await client.query(`ALTER TABLE loans ADD COLUMN IF NOT EXISTS term_frequency VARCHAR(10) NOT NULL DEFAULT 'monthly'`);
     await client.query(`ALTER TABLE loans ADD COLUMN IF NOT EXISTS admin_fees NUMERIC(18,2) NOT NULL DEFAULT 0`);
+    await client.query(`ALTER TABLE loans ADD COLUMN IF NOT EXISTS admin_fees_status VARCHAR(10) NOT NULL DEFAULT 'none'`);
+
+    // ── Admin Fee Payments ───────────────────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS admin_fee_payments (
+        id         VARCHAR(50)   PRIMARY KEY,
+        loan_id    VARCHAR(50)   NOT NULL REFERENCES loans(id) ON DELETE CASCADE,
+        amount     NUMERIC(18,2) NOT NULL,
+        date       DATE          NOT NULL,
+        notes      VARCHAR(500)  NULL,
+        added_by   VARCHAR(50)   NULL,
+        created_at TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_admin_fee_loan_id ON admin_fee_payments(loan_id)`);
 
     // ── Repayments ───────────────────────────────────────────────
     await client.query(`
