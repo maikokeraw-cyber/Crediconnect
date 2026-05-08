@@ -728,7 +728,12 @@ function navigate(page){
   if(page==='expenses'&&can('write'))   act.innerHTML=`<button class="btn btn-danger" onclick="openAddExpense()">＋ Record Expense</button>`;
   if(page==='users'&&can('admin'))      act.innerHTML=`<button class="btn btn-primary" onclick="openAddUser()">＋ Add User</button>`;
   const fns={dashboard:renderDashboard,clients:renderClients,loans:renderLoans,repayments:renderRepayments,expenses:renderExpenses,financials:renderFinancials,reports:renderReports,users:renderUsers,audit:renderAudit,backup:renderBackup,profile:renderProfile};
-  if(fns[page]) fns[page]();
+  // Always refresh from DB when visiting repayments or loans pages
+  if(USE_DB && (page==='repayments'||page==='loans')){
+    loadData().then(()=>{ if(fns[page]) fns[page](); });
+  } else {
+    if(fns[page]) fns[page]();
+  }
 }
 
 // ================================================================
@@ -1023,40 +1028,57 @@ function periodicInterestForLoan(loan){
   return loan.amount * loan.interestRate / 100 / loan.term;
 }
 
-function openLoanDetail(id){
+async function openLoanDetail(id){
   const loan=loans.find(l=>l.id===id);if(!loan)return;
-  const c=clients.find(c=>c.id===loan.clientId),tot=getLoanTotal(loan),bal=getLoanBalance(id),paid=tot-bal,pct=Math.min(100,Math.round(paid/tot*100));
+
+  // Always fetch fresh repayments and loan data from DB if connected
+  if(USE_DB){
+    try{
+      const [freshRepayments, freshLoans] = await Promise.all([
+        apiFetch('GET','/api/repayments'),
+        apiFetch('GET','/api/loans'),
+      ]);
+      // Update local cache
+      repayments = freshRepayments.map(normaliseRepayment);
+      loans      = freshLoans.map(normaliseLoan);
+      saveAll();
+    }catch(e){ console.warn('Could not refresh loan data:', e.message); }
+  }
+
+  // Re-fetch loan after possible update
+  const freshLoan=loans.find(l=>l.id===id)||loan;
+  const c=clients.find(c=>c.id===freshLoan.clientId),tot=getLoanTotal(freshLoan),bal=getLoanBalance(id),paid=tot-bal,pct=Math.min(100,Math.round(paid/tot*100));
   const rps=repayments.filter(r=>r.loanId===id).sort((a,b)=>b.date.localeCompare(a.date));
-  const amort=buildAmortisation(loan);
-  const periodicInt=periodicInterestForLoan(loan);
-  const periodicPrin=loan.amount/loan.term;
-  const periodicPay=getLoanTotal(loan)/loan.term;
-  const freq=loan.termFrequency||'monthly';
+  const amort=buildAmortisation(freshLoan);
+  const periodicInt=periodicInterestForLoan(freshLoan);
+  const periodicPrin=freshLoan.amount/freshLoan.term;
+  const periodicPay=getLoanTotal(freshLoan)/freshLoan.term;
+  const freq=freshLoan.termFrequency||'monthly';
   const freqLabel={'monthly':'Monthly','weekly':'Weekly','daily':'Daily'}[freq];
-  const status=getLoanStatus(loan);
+  const status=getLoanStatus(freshLoan);
 
   // Determine current & next period due rows
   const todayStr=today();
   const nextDue=amort.find(r=>r.dueDate>=todayStr)||null;
   const nextNextDue=nextDue?amort.find(r=>r.dueDate>nextDue.dueDate)||null:null;
 
-  document.getElementById('ldTitle').textContent=`Loan — ${c?c.name:'?'} ($${fmt(loan.amount)})`;
+  document.getElementById('ldTitle').textContent=`Loan — ${c?c.name:'?'} ($${fmt(freshLoan.amount)})`;
   document.getElementById('ldBody').innerHTML=`
     <div class="detail-grid" style="margin-bottom:16px">
       <div class="detail-item"><label>Client</label><div class="val">${c?c.name:'—'}</div></div>
       <div class="detail-item"><label>Status</label><div class="val"><span class="badge badge-${status}">${status}</span></div></div>
-      <div class="detail-item"><label>Principal</label><div class="val" style="color:var(--gold2)">$${fmt(loan.amount)}</div></div>
-      <div class="detail-item"><label>Interest Rate</label><div class="val">${loan.interestRate}% flat</div></div>
-      <div class="detail-item"><label>Total Interest</label><div class="val" style="color:var(--amber)">$${fmt(loan.amount*loan.interestRate/100)}</div></div>
+      <div class="detail-item"><label>Principal</label><div class="val" style="color:var(--gold2)">$${fmt(freshLoan.amount)}</div></div>
+      <div class="detail-item"><label>Interest Rate</label><div class="val">${freshLoan.interestRate}% flat</div></div>
+      <div class="detail-item"><label>Total Interest</label><div class="val" style="color:var(--amber)">$${fmt(freshLoan.amount*freshLoan.interestRate/100)}</div></div>
       <div class="detail-item"><label>Total Owed</label><div class="val">$${fmt(tot)}</div></div>
       <div class="detail-item"><label>${freqLabel} Payment</label><div class="val" style="color:var(--green)">$${fmt(periodicPay)}</div></div>
       <div class="detail-item"><label>${freqLabel} Interest</label><div class="val" style="color:var(--amber)">$${fmt(periodicInt)}</div></div>
       <div class="detail-item"><label>${freqLabel} Principal</label><div class="val" style="color:var(--blue)">$${fmt(periodicPrin)}</div></div>
-      <div class="detail-item"><label>Term</label><div class="val">${termLabel(loan)}</div></div>
-      <div class="detail-item"><label>Start Date</label><div class="val">${fmtDate(loan.startDate)}</div></div>
+      <div class="detail-item"><label>Term</label><div class="val">${termLabel(freshLoan)}</div></div>
+      <div class="detail-item"><label>Start Date</label><div class="val">${fmtDate(freshLoan.startDate)}</div></div>
       <div class="detail-item"><label>Balance</label><div class="val" style="color:${bal>0?'var(--red)':'var(--green)'}">${bal>0?'$'+fmt(bal):'✓ Fully Paid'}</div></div>
-      ${loan.adminFees>0?`<div class="detail-item"><label>Admin Fees</label><div class="val" style="color:var(--text2)">$${fmt(loan.adminFees)}</div></div>`:''}
-      ${loan.purpose?`<div class="detail-item"><label>Purpose</label><div class="val">${loan.purpose}</div></div>`:''}
+      ${freshLoan.adminFees>0?`<div class="detail-item"><label>Admin Fees</label><div class="val" style="color:var(--text2)">$${fmt(freshLoan.adminFees)}</div></div>`:''}
+      ${freshLoan.purpose?`<div class="detail-item"><label>Purpose</label><div class="val">${freshLoan.purpose}</div></div>`:''}
     </div>
 
     ${status==='active'?`
@@ -1112,9 +1134,9 @@ function openLoanDetail(id){
     '<div style="text-align:center;padding:20px;color:var(--text3)">No payments recorded yet</div>'}`;
 
   document.getElementById('ldFooter').innerHTML=`
-    ${can('delete')?`<button class="btn btn-danger btn-sm" onclick="deleteLoan('${id}')">Delete Loan</button>`:''}
-    ${can('admin')?`<button class="btn btn-ghost btn-sm" onclick="CM('mLoanDetail');openEditLoan('${id}')">✏️ Edit Loan</button>`:''}
-    ${can('write')?`<button class="btn btn-success btn-sm" onclick="CM('mLoanDetail');openAddRepayForLoan('${id}')">+ Record Payment</button>`:''}
+    ${can('delete')?`<button class="btn btn-danger btn-sm" onclick="deleteLoan('${freshLoan.id}')">Delete Loan</button>`:''}
+    ${can('admin')?`<button class="btn btn-ghost btn-sm" onclick="CM('mLoanDetail');openEditLoan('${freshLoan.id}')">✏️ Edit Loan</button>`:''}
+    ${can('write')?`<button class="btn btn-success btn-sm" onclick="CM('mLoanDetail');openAddRepayForLoan('${freshLoan.id}')">+ Record Payment</button>`:''}
     <button class="btn btn-ghost" onclick="CM('mLoanDetail')">Close</button>`;
   OM('mLoanDetail');
 }
