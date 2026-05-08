@@ -671,6 +671,14 @@ async function deleteAdminFeePayment(id) {
 // ================================================================
 function uid(){ return Math.random().toString(36).slice(2,10)+Date.now().toString(36); }
 function today(){ return new Date().toISOString().slice(0,10); }
+function validateDate(date, label){
+  if(!date) return `${label} is required`;
+  if(date > today()) return `${label} cannot be a future date. Please enter today or an earlier date.`;
+  return null;
+}
+function setMaxDate(...ids){
+  ids.forEach(id=>{ const el=document.getElementById(id); if(el) el.max=today(); });
+}
 function fmt(n){ return Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function fmtDate(d){ if(!d) return '—'; try{ return new Date(d+'T12:00:00').toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); }catch{return d;} }
 function fmtDT(d){ if(!d) return '—'; try{ return new Date(d).toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); }catch{return d;} }
@@ -951,7 +959,9 @@ function openAddLoan(preselect){
   ['fLA','fLR','fLT','fLP','fLN','fLAF'].forEach(i=>{const el=document.getElementById(i);if(el)el.value='';});
   document.getElementById('fLD').value=today();
   document.getElementById('fLF').value='monthly';
+  document.getElementById('fLAFPaid').checked=false;
   document.getElementById('loanPreview').style.display='none';
+  setMaxDate('fLD');
   OM('mAddLoan');
 }
 function openAddLoanForClient(id){openAddLoan(id);}
@@ -972,6 +982,7 @@ function saveLoan(){
   const adminFees=parseFloat(document.getElementById('fLAF').value)||0;
   const adminFeesPaid=document.getElementById('fLAFPaid').checked;
   if(!clientId||!amount||!rate||!term||!date)return toast('Please fill all required fields','error');
+  const dateErr=validateDate(date,'Disbursement date'); if(dateErr)return toast(dateErr,'error');
   if(adminFees>0&&!adminFeesPaid){
     if(!confirm('Admin fee of $'+fmt(adminFees)+' is not marked as paid.\n\nThe loan will be disbursed with admin fee recorded as PENDING.\n\nProceed?')) return;
   }
@@ -1126,6 +1137,7 @@ function openEditLoan(id){
   document.getElementById('eLFreq').value     = l.termFrequency||'monthly';
   document.getElementById('eLDate').value     = l.startDate;
   document.getElementById('eLStatus').value   = l.status;
+  setMaxDate('eLDate');
   document.getElementById('eLPurpose').value  = l.purpose||'';
   document.getElementById('eLAdminFees').value= l.adminFees||0;
   document.getElementById('eLNotes').value    = l.notes||'';
@@ -1142,6 +1154,7 @@ async function saveEditLoan(){
   const adminFees=parseFloat(document.getElementById('eLAdminFees').value)||0;
   const notes   = document.getElementById('eLNotes').value.trim();
   if(!amount||!rate||!term||!date) return toast('Please fill all required fields','error');
+  const dateErrL=validateDate(date,'Disbursement date'); if(dateErrL)return toast(dateErrL,'error');
   const loan = loans.find(l=>l.id===_editLoanId); if(!loan) return;
   const updated = {...loan,amount,interestRate:rate,term,termFrequency:freq,startDate:date,status,purpose,adminFees,notes};
   if(USE_DB){
@@ -1166,6 +1179,7 @@ function openEditRepayment(id){
   document.getElementById('eRAmount').value = r.amount;
   document.getElementById('eRDate').value   = r.date;
   document.getElementById('eRNotes').value  = r.notes||'';
+  setMaxDate('eRDate');
   OM('mEditRepay');
 }
 async function saveEditRepayment(){
@@ -1173,6 +1187,7 @@ async function saveEditRepayment(){
   const date   = document.getElementById('eRDate').value;
   const notes  = document.getElementById('eRNotes').value.trim();
   if(!amount||!date) return toast('Amount and date are required','error');
+  const dateErrRP=validateDate(date,'Payment date'); if(dateErrRP)return toast(dateErrRP,'error');
   const r=repayments.find(r=>r.id===_editRepayId); if(!r) return;
   if(USE_DB){
     try{
@@ -1229,6 +1244,7 @@ function openAddRepay(preselect){
   if(preselect)sel.value=preselect;
   document.getElementById('fRA').value='';document.getElementById('fRN').value='';document.getElementById('fRD').value=today();
   document.getElementById('fRInfo').style.display='none';
+  setMaxDate('fRD');
   if(preselect)updateRepayInfo();
   OM('mAddRepay');
 }
@@ -1246,6 +1262,7 @@ function updateRepayInfo(){
 async function saveRepay(){
   const loanId=document.getElementById('fRL').value,amount=parseFloat(document.getElementById('fRA').value),date=document.getElementById('fRD').value;
   if(!loanId||!amount||!date)return toast('Please fill all required fields','error');
+  const dateErrR=validateDate(date,'Payment date'); if(dateErrR)return toast(dateErrR,'error');
   const loan=loans.find(l=>l.id===loanId);
   if(!loan) return toast('Loan not found','error');
   const hasUnpaidAF=loan.adminFees>0&&loan.adminFeesStatus==='pending';
@@ -1253,7 +1270,8 @@ async function saveRepay(){
     const adminFee=loan.adminFees;
     if(amount<=adminFee){
       if(!confirm('Admin Fee Outstanding: $'+fmt(adminFee)+'\n\nThis payment of $'+fmt(amount)+' will go entirely to the admin fee.\n\nConfirm?')) return;
-      await addAdminFeePayment({loanId,amount,date,notes:'Partial admin fee payment'});
+      const dateErrAF=validateDate(date,'Payment date'); if(dateErrAF)return toast(dateErrAF,'error');
+    await addAdminFeePayment({loanId,amount,date,notes:'Partial admin fee payment'});
       if(amount>=adminFee-0.005){const l2=loans.find(l=>l.id===loanId);if(l2)l2.adminFeesStatus='paid';saveAll();}
       addAudit('RECORD_ADMIN_FEE','AdminFee',loanId,'$'+amount+' partial admin fee');
       CM('mAddRepay');renderRepayments();updateStorageInfo();
@@ -1335,11 +1353,13 @@ function renderExpenses(){
 function openAddExpense(){
   ['fEA','fEDesc'].forEach(i=>{const el=document.getElementById(i);if(el)el.value='';});
   document.getElementById('fEC').value='';document.getElementById('fED').value=today();
+  setMaxDate('fED');
   OM('mAddExpense');
 }
 function saveExpense(){
   const amount=parseFloat(document.getElementById('fEA').value),category=document.getElementById('fEC').value,date=document.getElementById('fED').value;
   if(!amount||!category||!date)return toast('Amount, category and date are required','error');
+  const dateErrE=validateDate(date,'Expense date'); if(dateErrE)return toast(dateErrE,'error');
   addExpenseData({amount,category,description:document.getElementById('fEDesc').value.trim(),date}).then(r=>{
     addAudit('ADD_EXPENSE','Expense',r.id,`$${amount} — ${category}`);
     CM('mAddExpense');renderExpenses();updateStorageInfo();toast(`Expense of $${fmt(amount)} recorded`,'success');
