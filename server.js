@@ -318,7 +318,20 @@ app.post('/api/loans', requireAuth, requireDB, requireRole('admin','loan_officer
 
 app.put('/api/loans/:id', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
   try {
-    await pool.query('UPDATE loans SET status=$1,notes=$2,updated_at=NOW() WHERE id=$3', [req.body.status, req.body.notes||null, req.params.id]);
+    const { amount, interestRate, term, termFrequency, startDate, status, purpose, adminFees, notes } = req.body;
+    if(amount){
+      // Full edit (admin)
+      await pool.query(
+        `UPDATE loans SET amount=$1,interest_rate=$2,term=$3,term_frequency=$4,start_date=$5,
+         status=$6,purpose=$7,admin_fees=$8,notes=$9,updated_at=NOW() WHERE id=$10`,
+        [amount, interestRate||0, term||1, termFrequency||'monthly',
+         startDate, status||'active', purpose||null, adminFees||0, notes||null, req.params.id]
+      );
+      await audit(req.user.id, req.user.username, 'EDIT_LOAN', 'Loan', req.params.id, `Edited loan $${amount}`);
+    } else {
+      // Status/notes update only
+      await pool.query('UPDATE loans SET status=$1,notes=$2,updated_at=NOW() WHERE id=$3', [status, notes||null, req.params.id]);
+    }
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -365,6 +378,32 @@ app.post('/api/repayments', requireAuth, requireDB, requireRole('admin','loan_of
     await audit(req.user.id, req.user.username, 'RECORD_REPAYMENT', 'Repayment', id, `$${amount} for loan ${loanId}`);
     const { rows } = await pool.query('SELECT * FROM repayments WHERE id=$1', [id]);
     res.status(201).json(mapRepay(rows[0]));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/repayments/:id', requireAuth, requireDB, requireRole('admin'), async (req, res) => {
+  try {
+    const { amount, date, notes } = req.body;
+    if(!amount||!date) return res.status(400).json({ error: 'amount and date required' });
+    await pool.query('UPDATE repayments SET amount=$1,date=$2,notes=$3 WHERE id=$4',
+      [amount, date, notes||null, req.params.id]);
+    // Recalculate loan status after edit
+    const repRes = await pool.query('SELECT loan_id FROM repayments WHERE id=$1', [req.params.id]);
+    const loanId = repRes.rows[0]?.loan_id;
+    if(loanId){
+      const loanRes = await pool.query('SELECT * FROM loans WHERE id=$1', [loanId]);
+      const loan = loanRes.rows[0];
+      if(loan && loan.status !== 'defaulted'){
+        const totalOwed = Number(loan.amount) + Number(loan.amount) * Number(loan.interest_rate) / 100;
+        const paidRes  = await pool.query('SELECT COALESCE(SUM(amount),0) AS paid FROM repayments WHERE loan_id=$1', [loanId]);
+        const paid     = Number(paidRes.rows[0].paid);
+        const newStatus= paid >= totalOwed - 0.005 ? 'completed' : 'active';
+        if(newStatus !== loan.status)
+          await pool.query('UPDATE loans SET status=$1,updated_at=NOW() WHERE id=$2', [newStatus, loanId]);
+      }
+    }
+    await audit(req.user.id, req.user.username, 'EDIT_REPAYMENT', 'Repayment', req.params.id, `Updated to $${amount}`);
+    res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

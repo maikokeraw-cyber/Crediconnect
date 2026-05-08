@@ -388,7 +388,37 @@ input::placeholder{color:var(--text3)}
   <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mAddExpense')">Cancel</button><button class="btn btn-danger" onclick="saveExpense()">Record Expense</button></div>
 </div></div>
 
-<div class="modal-backdrop" id="mUser"><div class="modal">
+<!-- Edit Loan Modal -->
+<div class="modal-backdrop" id="mEditLoan"><div class="modal">
+  <div class="modal-header"><div class="modal-title">Edit Loan</div><button class="modal-close" onclick="CM('mEditLoan')">×</button></div>
+  <div class="modal-body"><div class="form-grid">
+    <div class="form-group"><label>Principal Amount *</label><input id="eLAmount" type="number" step="0.01"></div>
+    <div class="form-group"><label>Interest Rate (%) *</label><input id="eLRate" type="number" step="0.5"></div>
+    <div class="form-group"><label>Term (Number) *</label><input id="eLTerm" type="number"></div>
+    <div class="form-group"><label>Term Frequency *</label>
+      <select id="eLFreq"><option value="monthly">Monthly</option><option value="weekly">Weekly</option><option value="daily">Daily</option></select>
+    </div>
+    <div class="form-group"><label>Disbursement Date *</label><input id="eLDate" type="date"></div>
+    <div class="form-group"><label>Status *</label>
+      <select id="eLStatus"><option value="active">Active</option><option value="completed">Completed</option><option value="defaulted">Defaulted</option></select>
+    </div>
+    <div class="form-group"><label>Purpose</label><input id="eLPurpose" placeholder="Business, Agriculture…"></div>
+    <div class="form-group"><label>Admin Fees</label><input id="eLAdminFees" type="number" step="0.01" placeholder="0.00"></div>
+    <div class="form-group full"><label>Notes</label><textarea id="eLNotes"></textarea></div>
+  </div></div>
+  <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mEditLoan')">Cancel</button><button class="btn btn-primary" onclick="saveEditLoan()">Save Changes</button></div>
+</div></div>
+
+<!-- Edit Repayment Modal -->
+<div class="modal-backdrop" id="mEditRepay"><div class="modal">
+  <div class="modal-header"><div class="modal-title">Edit Repayment</div><button class="modal-close" onclick="CM('mEditRepay')">×</button></div>
+  <div class="modal-body"><div class="form-grid">
+    <div class="form-group"><label>Amount *</label><input id="eRAmount" type="number" step="0.01"></div>
+    <div class="form-group"><label>Date *</label><input id="eRDate" type="date"></div>
+    <div class="form-group full"><label>Notes</label><input id="eRNotes" placeholder="Cash, Bank transfer…"></div>
+  </div></div>
+  <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mEditRepay')">Cancel</button><button class="btn btn-primary" onclick="saveEditRepayment()">Save Changes</button></div>
+</div></div>
   <div class="modal-header"><div class="modal-title" id="mUserTitle">Add User</div><button class="modal-close" onclick="CM('mUser')">×</button></div>
   <div class="modal-body"><div class="form-grid">
     <div class="form-group"><label>Full Name *</label><input id="fUFN" placeholder="Jane Doe"></div>
@@ -1067,11 +1097,12 @@ function openLoanDetail(id){
       <th style="text-align:right;padding:8px 10px;background:var(--surface);color:var(--text3);font-size:10px">Amount</th>
       <th style="text-align:left;padding:8px 10px;background:var(--surface);color:var(--text3);font-size:10px">Notes</th>
     </tr></thead>
-    <tbody>${rps.map(r=>`<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 10px;color:var(--text2)">${fmtDate(r.date)}</td><td style="padding:8px 10px;color:var(--green);text-align:right;font-family:'DM Mono',monospace">+$${fmt(r.amount)}</td><td style="padding:8px 10px;color:var(--text3)">${r.notes||'—'}</td></tr>`).join('')}</tbody></table>`:
+    <tbody>${rps.map(r=>`<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 10px;color:var(--text2)">${fmtDate(r.date)}</td><td style="padding:8px 10px;color:var(--green);text-align:right;font-family:'DM Mono',monospace">+$${fmt(r.amount)}</td><td style="padding:8px 10px;color:var(--text3)">${r.notes||'—'}</td><td style="padding:8px 10px" onclick="event.stopPropagation()">${can('admin')?`<button class="btn btn-ghost btn-sm" onclick="openEditRepayment('${r.id}')">✏️</button>`:''}</td></tr>`).join('')}</tbody></table>`:
     '<div style="text-align:center;padding:20px;color:var(--text3)">No payments recorded yet</div>'}`;
 
   document.getElementById('ldFooter').innerHTML=`
     ${can('delete')?`<button class="btn btn-danger btn-sm" onclick="deleteLoan('${id}')">Delete Loan</button>`:''}
+    ${can('admin')?`<button class="btn btn-ghost btn-sm" onclick="CM('mLoanDetail');openEditLoan('${id}')">✏️ Edit Loan</button>`:''}
     ${can('write')?`<button class="btn btn-success btn-sm" onclick="CM('mLoanDetail');openAddRepayForLoan('${id}')">+ Record Payment</button>`:''}
     <button class="btn btn-ghost" onclick="CM('mLoanDetail')">Close</button>`;
   OM('mLoanDetail');
@@ -1082,6 +1113,79 @@ function deleteLoan(id){
     addAudit('DELETE_LOAN','Loan',id,'Deleted');
     CM('mLoanDetail');renderLoans();updateStorageInfo();toast('Loan deleted','success');
   }).catch(e=>toast('Error: '+e.message,'error'));
+}
+
+// ── Edit Loan ─────────────────────────────────────────────────────
+let _editLoanId = null;
+function openEditLoan(id){
+  const l=loans.find(l=>l.id===id); if(!l) return;
+  _editLoanId=id;
+  document.getElementById('eLAmount').value   = l.amount;
+  document.getElementById('eLRate').value     = l.interestRate;
+  document.getElementById('eLTerm').value     = l.term;
+  document.getElementById('eLFreq').value     = l.termFrequency||'monthly';
+  document.getElementById('eLDate').value     = l.startDate;
+  document.getElementById('eLStatus').value   = l.status;
+  document.getElementById('eLPurpose').value  = l.purpose||'';
+  document.getElementById('eLAdminFees').value= l.adminFees||0;
+  document.getElementById('eLNotes').value    = l.notes||'';
+  OM('mEditLoan');
+}
+async function saveEditLoan(){
+  const amount  = parseFloat(document.getElementById('eLAmount').value);
+  const rate    = parseFloat(document.getElementById('eLRate').value);
+  const term    = parseInt(document.getElementById('eLTerm').value);
+  const freq    = document.getElementById('eLFreq').value;
+  const date    = document.getElementById('eLDate').value;
+  const status  = document.getElementById('eLStatus').value;
+  const purpose = document.getElementById('eLPurpose').value.trim();
+  const adminFees=parseFloat(document.getElementById('eLAdminFees').value)||0;
+  const notes   = document.getElementById('eLNotes').value.trim();
+  if(!amount||!rate||!term||!date) return toast('Please fill all required fields','error');
+  const loan = loans.find(l=>l.id===_editLoanId); if(!loan) return;
+  const updated = {...loan,amount,interestRate:rate,term,termFrequency:freq,startDate:date,status,purpose,adminFees,notes};
+  if(USE_DB){
+    try{
+      await apiFetch('PUT',`/api/loans/${_editLoanId}`,{amount,interestRate:rate,term,termFrequency:freq,startDate:date,status,purpose,adminFees,notes});
+      Object.assign(loan, updated); saveAll();
+      addAudit('EDIT_LOAN','Loan',_editLoanId,`Updated loan $${amount}`);
+      CM('mEditLoan'); renderLoans(); toast('Loan updated','success');
+    }catch(e){ toast('Error: '+e.message,'error'); }
+  } else {
+    Object.assign(loan, updated); saveAll();
+    addAudit('EDIT_LOAN','Loan',_editLoanId,`Updated loan $${amount}`);
+    CM('mEditLoan'); renderLoans(); toast('Loan updated','success');
+  }
+}
+
+// ── Edit Repayment ────────────────────────────────────────────────
+let _editRepayId = null;
+function openEditRepayment(id){
+  const r=repayments.find(r=>r.id===id); if(!r) return;
+  _editRepayId=id;
+  document.getElementById('eRAmount').value = r.amount;
+  document.getElementById('eRDate').value   = r.date;
+  document.getElementById('eRNotes').value  = r.notes||'';
+  OM('mEditRepay');
+}
+async function saveEditRepayment(){
+  const amount = parseFloat(document.getElementById('eRAmount').value);
+  const date   = document.getElementById('eRDate').value;
+  const notes  = document.getElementById('eRNotes').value.trim();
+  if(!amount||!date) return toast('Amount and date are required','error');
+  const r=repayments.find(r=>r.id===_editRepayId); if(!r) return;
+  if(USE_DB){
+    try{
+      await apiFetch('PUT',`/api/repayments/${_editRepayId}`,{amount,date,notes});
+      r.amount=amount; r.date=date; r.notes=notes; saveAll();
+      addAudit('EDIT_REPAYMENT','Repayment',_editRepayId,`Updated to $${amount}`);
+      CM('mEditRepay'); renderRepayments(); toast('Repayment updated','success');
+    }catch(e){ toast('Error: '+e.message,'error'); }
+  } else {
+    r.amount=amount; r.date=date; r.notes=notes; saveAll();
+    addAudit('EDIT_REPAYMENT','Repayment',_editRepayId,`Updated to $${amount}`);
+    CM('mEditRepay'); renderRepayments(); toast('Repayment updated','success');
+  }
 }
 
 // ================================================================
@@ -1114,7 +1218,7 @@ function renderRepayments(){
       <td style="color:var(--green);font-weight:600;font-family:'DM Mono',monospace">+$${fmt(r.amount)}</td>
       <td style="font-family:'DM Mono',monospace;color:${balAfter>0?'var(--amber)':'var(--green)'}">${fmt(balAfter)}</td>
       <td style="color:var(--text2);font-size:12px">${r.notes||'--'}</td>
-      <td onclick="event.stopPropagation()">${can('delete')?`<button class="btn btn-danger btn-sm" onclick="deleteRepayment('${r.id}')">Delete</button>`:''}</td>
+      <td onclick="event.stopPropagation()">${can('admin')?`<button class="btn btn-ghost btn-sm" style="margin-right:4px" onclick="openEditRepayment('${r.id}')">✏️</button>`:''} ${can('delete')?`<button class="btn btn-danger btn-sm" onclick="deleteRepayment('${r.id}')">Delete</button>`:''}</td>
     </tr>`;
   }).join('');
 }
