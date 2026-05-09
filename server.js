@@ -297,17 +297,17 @@ app.post('/api/loans', requireAuth, requireDB, requireRole('admin','loan_officer
     const { clientId, amount, interestRate, term, termFrequency, startDate, purpose, notes, adminFees, adminFeesPaid } = req.body;
     if (!clientId || !amount || !interestRate || !term || !startDate) return res.status(400).json({ error: 'Missing required fields' });
     const id = uuidv4();
-    const adminFeesStatus = adminFees > 0 ? (adminFeesPaid ? 'paid' : 'pending') : 'none';
+    const adminFeesStatus = adminFees > 0 ? 'paid' : 'none'; // Always retained at disbursement
     await pool.query(
       `INSERT INTO loans (id,client_id,amount,interest_rate,term,term_frequency,start_date,purpose,notes,admin_fees,admin_fees_status,added_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
       [id, clientId, amount, interestRate, term, termFrequency||'monthly', startDate, purpose||null, notes||null, adminFees||0, adminFeesStatus, req.user.id]
     );
-    // If admin fee paid upfront, record it
-    if (adminFees > 0 && adminFeesPaid) {
+    // Always record admin fee as retained at disbursement
+    if (adminFees > 0) {
       await pool.query(
         `INSERT INTO admin_fee_payments (id,loan_id,amount,date,notes,added_by) VALUES ($1,$2,$3,$4,$5,$6)`,
-        [uuidv4(), id, adminFees, startDate, 'Paid at disbursement', req.user.id]
+        [uuidv4(), id, adminFees, startDate, 'Deducted at disbursement', req.user.id]
       );
     }
     await audit(req.user.id, req.user.username, 'DISBURSE_LOAN', 'Loan', id, `$${amount} to ${clientId}${adminFees>0?' +$'+adminFees+' admin fee ('+adminFeesStatus+')':''}`);
