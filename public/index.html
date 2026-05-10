@@ -270,6 +270,7 @@ input::placeholder{color:var(--text3)}
       </div>
     </nav>
     <div id="main">
+      <div id="noBranchBanner" style="display:none;background:#7c2d12;color:#fca5a5;padding:8px 20px;font-size:12px;font-weight:600;text-align:center">⚠️ Your account has no branch assigned. Contact your Super Admin to assign you to a branch before adding records.</div>
       <div class="topbar"><div id="pageTitle" class="page-title">Dashboard</div><div class="topbar-actions" id="topbarActions"></div></div>
       <div class="content">
         <div id="page-dashboard" class="page active"></div>
@@ -616,11 +617,15 @@ function enterApp(){
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('appWrapper').classList.add('visible');
   if(!isSuperAdmin()) activeBranch = currentUser.branchId || null;
+  // Show warning if non-super-admin has no branch
+  const banner = document.getElementById('noBranchBanner');
+  if(banner) banner.style.display = (!isSuperAdmin() && !currentUser?.branchId) ? 'block' : 'none';
   applySidebarRole();
   showBranchSelector();
   if(isSuperAdmin()) document.querySelectorAll('.nav-super-admin').forEach(el=>el.style.display='');
   document.getElementById('sbName').textContent   = currentUser.fullName;
-  document.getElementById('sbRole').textContent   = currentUser.role.replace(/_/g,' ');
+  const roleLabels = {super_admin:'Super Admin',admin:'Admin',loan_officer:'Loan Officer',viewer:'Viewer'};
+  document.getElementById('sbRole').textContent = roleLabels[currentUser.role]||currentUser.role;
   document.getElementById('sbAvatar').textContent = initials(currentUser.fullName);
   // Show branch name for non-super-admin users
   const sbBranch = document.getElementById('sbBranch');
@@ -661,11 +666,13 @@ function can(action){
 function isSuperAdmin(){ return currentUser?.role==='super_admin'; }
 function branchParam(){
   if(isSuperAdmin()) return activeBranch?`?branch=${activeBranch}`:'';
-  return currentUser?.branchId?`?branch=${currentUser.branchId}`:'';
+  const bid = currentUser?.branchId;
+  return (bid && bid !== '') ? `?branch=${bid}` : '';
 }
 function myBranchId(){
   if(isSuperAdmin()) return activeBranch||null;
-  return currentUser?.branchId||null;
+  const bid = currentUser?.branchId;
+  return (bid && bid !== '') ? bid : null;
 }
 // toggleBranchField replaced by _toggleBranchRow
 function populateBranchDropdown(selId, selectedId){
@@ -805,7 +812,15 @@ function termLabel(loan){
 function clientLoans(cid){ return loans.filter(l=>l.clientId===cid); }
 function avatarColor(n){ const c=['#3b82f6','#8b5cf6','#ec4899','#10b981','#f59e0b','#ef4444','#06b6d4'];let h=0;for(let ch of(n||''))h+=ch.charCodeAt(0);return c[h%c.length]; }
 function initials(n){ return(n||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(); }
-function roleBadge(r){ return `<span class="role-badge ${r}">${r.replace('_',' ')}</span>`; }
+function roleBadge(r){
+  const labels = {
+    'super_admin': '🌐 Super Admin',
+    'admin':       '🔑 Admin',
+    'loan_officer':'👤 Loan Officer',
+    'viewer':      '👁 Viewer'
+  };
+  return `<span class="role-badge ${r}">${labels[r]||r}</span>`;
+}
 function permDenied(m){ return `<div class="perm-denied"><div class="icon">🔒</div><h3>Access Restricted</h3><p>${m}</p></div>`; }
 
 function updateStorageInfo(){
@@ -813,7 +828,8 @@ function updateStorageInfo(){
   const mode = USE_DB
     ? `<span style="color:var(--green)">● Supabase PostgreSQL</span>`
     : `<span style="color:var(--amber)">● localStorage (offline)</span>`;
-  document.getElementById('storageInfo').innerHTML=`v4.1 · ${mode} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
+  const bLabel=isSuperAdmin()?(activeBranch?`Branch:${branches.find(b=>b.id===activeBranch)?.name||activeBranch.slice(-4)}`:'All'):(currentUser?.branchId?`Branch:${branches.find(b=>b.id===currentUser.branchId)?.name||'ID:'+currentUser.branchId.slice(-4)}`:'⚠️ No Branch');
+document.getElementById('storageInfo').innerHTML=`v4.1 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
 }
 
 // ================================================================
@@ -1086,6 +1102,7 @@ function saveClient(){
   // Determine branch — super admin picks from dropdown, others use their own branch
   const selectedBranch = document.getElementById('fClientBranch')?.value || null;
   const branchId = isSuperAdmin() ? (selectedBranch || activeBranch || null) : myBranchId();
+  if(!branchId) return toast('Cannot add client — your account has no branch assigned. Ask your Super Admin to assign you to a branch.','error');
   if(isSuperAdmin() && !branchId) return toast('Please select a branch for this client','error');
   const data={name,phone,nationalId:document.getElementById('fCI').value.trim(),email:document.getElementById('fCE').value.trim(),address:document.getElementById('fCA').value.trim(),occupation:document.getElementById('fCO').value.trim(),dob:document.getElementById('fCD').value||'',dateAdded:today(),branchId};
   addClient(data).then(()=>{
@@ -1123,6 +1140,7 @@ function openClientDetail(id){
   OM('mClientDetail');
 }
 function deleteClientDirect(id){
+  if(!can('delete')) return toast('You do not have permission to delete clients','error');
   const c=clients.find(c=>c.id===id);
   if(!c) return;
   if(!confirm(`Delete client "${c.name}" and all their data? This cannot be undone.`)) return;
@@ -1213,6 +1231,7 @@ function updateLoanPreview(){
 function saveLoan(){
   const clientId=document.getElementById('fLC').value,amount=parseFloat(document.getElementById('fLA').value),rate=parseFloat(document.getElementById('fLR').value),term=parseInt(document.getElementById('fLT').value),date=document.getElementById('fLD').value,freq=document.getElementById('fLF').value;
   const adminFees=parseFloat(document.getElementById('fLAF').value);
+  if(!myBranchId()&&!isSuperAdmin()) return toast('Cannot disburse loan — your account has no branch assigned. Ask your Super Admin.','error');
   if(!clientId||!amount||!rate||!term||!date)return toast('Please fill all required fields','error');
   if(!adminFees&&adminFees!==0)return toast('Admin Fees is required. Enter 0 if no fees apply.','error');
   if(adminFees<0)return toast('Admin Fees cannot be negative.','error');
