@@ -632,14 +632,25 @@ function myBranchId(){
   return currentUser?.branchId||null;
 }
 function toggleBranchField(){
-  const role=document.getElementById('mURole')?.value;
-  const wrap=document.getElementById('mUBranchWrap');
-  if(wrap) wrap.style.display=role==='super_admin'?'none':'';
+  const roleEl = document.getElementById('fUR');
+  const role = roleEl ? roleEl.value : '';
+  const wrap = document.getElementById('mUBranchWrap');
+  if(wrap) wrap.style.display = role==='super_admin' ? 'none' : '';
 }
 function populateBranchDropdown(selId, selectedId){
-  const sel=document.getElementById(selId); if(!sel) return;
-  sel.innerHTML='<option value="">-- Select Branch --</option>'+branches.filter(b=>b.active).map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
-  if(selectedId) sel.value=selectedId;
+  const sel = document.getElementById(selId); if(!sel) return;
+  const opts = branches.filter(b=>b.active);
+  if(!opts.length && USE_DB){
+    // Branches not loaded yet — fetch them
+    apiFetch('GET','/api/branches').then(data=>{
+      branches = data.map(b=>({id:b.id,name:b.name,active:b.active}));
+      populateBranchDropdown(selId, selectedId);
+    }).catch(()=>{});
+    return;
+  }
+  sel.innerHTML = '<option value="">— Select Branch —</option>' +
+    opts.map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
+  if(selectedId) sel.value = selectedId;
 }
 function applySidebarRole(){
   document.querySelectorAll('.nav-admin').forEach(el=>el.style.display=can('admin')?'':'none');
@@ -1693,9 +1704,18 @@ function renderReports(){
 let _editUserId=null;
 async function renderUsers(){
   if(!can('admin')){document.getElementById('usrContent').innerHTML=permDenied('User Management is for Administrators only.');return;}
-  let userList = users;
-  if (USE_DB) {
-    try { userList = await apiFetch('GET','/api/users'); } catch(e) {}
+  // Always fetch fresh user list and ensure branches are loaded
+  if(USE_DB){
+    try {
+      const [freshUsers, freshBranches] = await Promise.all([
+        apiFetch('GET','/api/users'),
+        branches.length ? Promise.resolve(branches) : apiFetch('GET','/api/branches')
+      ]);
+      userList = freshUsers;
+      if(!branches.length) branches = freshBranches.map(b=>({id:b.id,name:b.name,active:b.active}));
+    } catch(e) { userList = users.slice(); }
+  } else {
+    userList = users.slice();
   }
   document.getElementById('usrContent').innerHTML=`
     <div class="card" style="margin-bottom:20px"><div class="table-wrap"><table>
