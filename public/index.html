@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Credinova — Financial Solutions</title>
+<title>Credinova v4.1 — Financial Solutions</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
@@ -236,7 +236,7 @@ input::placeholder{color:var(--text3)}
   </div>
   <div id="appLayout">
     <nav id="sidebar">
-      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions</div></div>
+      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v4.1</div></div>
       <div class="nav">
         <div class="nav-section">Overview</div>
         <div class="nav-item active" id="nav-dashboard" onclick="navigate('dashboard')" class="nav-item-admin-only"><span class="icon">📊</span>Dashboard</div>
@@ -429,7 +429,7 @@ input::placeholder{color:var(--text3)}
     <div class="form-group"><label>Full Name *</label><input id="fUFN" placeholder="Jane Doe"></div>
     <div class="form-group"><label>Username *</label><input id="fUUN" placeholder="janedoe"></div>
     <div class="form-group"><label>Role *</label>
-      <select id="fUR" onchange="toggleBranchField()">
+      <select id="fUR" onchange="_toggleBranchRow()">
         <option value="viewer">Viewer — Read only</option>
         <option value="loan_officer">Loan Officer — Add & record</option>
         <option value="admin">Admin — Full access</option>
@@ -631,12 +631,7 @@ function myBranchId(){
   if(isSuperAdmin()) return activeBranch||null;
   return currentUser?.branchId||null;
 }
-function toggleBranchField(){
-  const roleEl = document.getElementById('fUR');
-  const role = roleEl ? roleEl.value : '';
-  const wrap = document.getElementById('mUBranchWrap');
-  if(wrap) wrap.style.display = role==='super_admin' ? 'none' : '';
-}
+// toggleBranchField replaced by _toggleBranchRow
 function populateBranchDropdown(selId, selectedId){
   const sel = document.getElementById(selId); if(!sel) return;
   const opts = branches.filter(b=>b.active);
@@ -1701,22 +1696,30 @@ function renderReports(){
 // ================================================================
 //  USER MANAGEMENT — admin only
 // ================================================================
-let _editUserId=null;
+let _editUserId = null;
+const _userMap  = new Map(); // id → user object, always fresh
+
 async function renderUsers(){
   if(!can('admin')){document.getElementById('usrContent').innerHTML=permDenied('User Management is for Administrators only.');return;}
-  // Always fetch fresh user list and ensure branches are loaded
-  if(USE_DB){
-    try {
+  // Fetch fresh data — users and branches together
+  try {
+    if(USE_DB){
       const [freshUsers, freshBranches] = await Promise.all([
         apiFetch('GET','/api/users'),
-        branches.length ? Promise.resolve(branches) : apiFetch('GET','/api/branches')
+        apiFetch('GET','/api/branches')
       ]);
       userList = freshUsers;
-      if(!branches.length) branches = freshBranches.map(b=>({id:b.id,name:b.name,active:b.active}));
-    } catch(e) { userList = users.slice(); }
-  } else {
+      branches = freshBranches.map(b=>({id:b.id,name:b.name,active:b.active}));
+    } else {
+      userList = users.slice();
+    }
+  } catch(e){
     userList = users.slice();
+    console.warn('renderUsers fetch error:',e.message);
   }
+  // Always rebuild the map so Edit button always finds its user
+  _userMap.clear();
+  userList.forEach(u => _userMap.set(String(u.id), u));
   document.getElementById('usrContent').innerHTML=`
     <div class="card" style="margin-bottom:20px"><div class="table-wrap"><table>
       <thead><tr><th>User</th><th>Username</th><th>Role</th><th>Branch</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
@@ -1742,78 +1745,100 @@ async function renderUsers(){
       </div>
     </div></div>`;
 }
+function _fillBranchSelect(selectedId){
+  const sel = document.getElementById('mUBranch');
+  if(!sel) return;
+  sel.innerHTML = '<option value="">— Select Branch —</option>' +
+    branches.filter(b=>b.active!==false).map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
+  if(selectedId) sel.value = selectedId;
+}
+function _toggleBranchRow(){
+  const role  = document.getElementById('fUR')?.value || '';
+  const wrap  = document.getElementById('mUBranchWrap');
+  if(wrap) wrap.style.display = role === 'super_admin' ? 'none' : '';
+}
 function openAddUser(){
-  _editUserId=null;
-  document.getElementById('mUserTitle').textContent='Add New User';
-  ['fUFN','fUUN','fUP','fUP2'].forEach(i=>{const el=document.getElementById(i);if(el)el.value='';});
-  document.getElementById('fUR').value='loan_officer';
-  document.getElementById('fUAct').value='1';
-  document.getElementById('fUUN').disabled=false;
-  document.getElementById('fUPL').textContent='Password *';
-  document.getElementById('fUP2L').textContent='Confirm Password *';
-  populateBranchDropdown('mUBranch', null);
-  toggleBranchField();
+  _editUserId = null;
+  document.getElementById('mUserTitle').textContent = 'Add New User';
+  document.getElementById('fUFN').value    = '';
+  document.getElementById('fUUN').value    = '';
+  document.getElementById('fUUN').disabled = false;
+  document.getElementById('fUR').value     = 'loan_officer';
+  document.getElementById('fUAct').value   = '1';
+  document.getElementById('fUP').value     = '';
+  document.getElementById('fUP2').value    = '';
+  document.getElementById('fUPL').textContent  = 'Password *';
+  document.getElementById('fUP2L').textContent = 'Confirm Password *';
+  _fillBranchSelect(null);
+  _toggleBranchRow();
   OM('mUser');
 }
 function openEditUser(id){
-  // Look up the user from the cached userList
-  const u = userList.find(u=>u.id===id);
-  if(!u){ toast('User not found','error'); return; }
+  const u = _userMap.get(String(id));
+  if(!u){ toast('User data not found — please refresh the page','error'); return; }
   _editUserId = u.id;
-  document.getElementById('mUserTitle').textContent = 'Edit User — '+u.fullName;
-  document.getElementById('fUFN').value  = u.fullName||'';
-  document.getElementById('fUUN').value  = u.username||'';
+  document.getElementById('mUserTitle').textContent = 'Edit User';
+  document.getElementById('fUFN').value    = u.fullName || '';
+  document.getElementById('fUUN').value    = u.username || '';
   document.getElementById('fUUN').disabled = true;
-  document.getElementById('fUR').value   = u.role||'loan_officer';
-  document.getElementById('fUAct').value = (u.active===false)?'0':'1';
-  document.getElementById('fUP').value   = '';
-  document.getElementById('fUP2').value  = '';
+  document.getElementById('fUR').value     = u.role || 'loan_officer';
+  document.getElementById('fUAct').value   = (u.active === false) ? '0' : '1';
+  document.getElementById('fUP').value     = '';
+  document.getElementById('fUP2').value    = '';
   document.getElementById('fUPL').textContent  = 'New Password (leave blank to keep)';
   document.getElementById('fUP2L').textContent = 'Confirm New Password';
-  populateBranchDropdown('mUBranch', u.branchId||null);
-  toggleBranchField();
+  _fillBranchSelect(u.branchId || null);
+  _toggleBranchRow();
   OM('mUser');
 }
 async function saveUser(){
-  const fullName=document.getElementById('fUFN').value.trim();
-  const username=document.getElementById('fUUN').value.trim().toLowerCase();
-  const role=document.getElementById('fUR').value;
-  const active=document.getElementById('fUAct').value==='1';
-  const branchId=document.getElementById('mUBranch')?.value||null;
-  const pwd=document.getElementById('fUP').value;
-  const pwd2=document.getElementById('fUP2').value;
-  if(!fullName) return toast('Full name is required','error');
-  if(!_editUserId&&!username) return toast('Username is required','error');
-  if(role!=='super_admin'&&!branchId) return toast('Please select a branch for this user','error');
-  if((!_editUserId||pwd)&&pwd!==pwd2) return toast('Passwords do not match','error');
-  if((!_editUserId||pwd)&&pwd&&pwd.length<6) return toast('Password must be at least 6 characters','error');
+  const fullName = document.getElementById('fUFN').value.trim();
+  const username = document.getElementById('fUUN').value.trim().toLowerCase();
+  const role     = document.getElementById('fUR').value;
+  const active   = document.getElementById('fUAct').value === '1';
+  const branchId = (role === 'super_admin') ? null : (document.getElementById('mUBranch')?.value || null);
+  const pwd      = document.getElementById('fUP').value;
+  const pwd2     = document.getElementById('fUP2').value;
+
+  // Validation
+  if(!fullName)                         return toast('Full name is required','error');
+  if(!_editUserId && !username)         return toast('Username is required','error');
+  if(role !== 'super_admin' && !branchId) return toast('Please select a branch','error');
+  if(pwd && pwd !== pwd2)               return toast('Passwords do not match','error');
+  if(pwd && pwd.length < 6)            return toast('Password must be at least 6 characters','error');
+  if(!_editUserId && !pwd)             return toast('Password is required for new user','error');
+
   if(USE_DB){
     try{
       if(_editUserId){
-        const body={fullName,role,active,branchId:role==='super_admin'?null:branchId};
-        if(pwd) body.password=pwd;
-        await apiFetch('PUT',`/api/users/${_editUserId}`,body);
+        const body = { fullName, role, active, branchId };
+        if(pwd) body.password = pwd;
+        await apiFetch('PUT', `/api/users/${_editUserId}`, body);
+        toast('User updated successfully','success');
       } else {
-        if(!pwd) return toast('Password is required','error');
-        await apiFetch('POST','/api/users',{username,fullName,role,password:pwd,branchId:role==='super_admin'?null:branchId});
+        await apiFetch('POST', '/api/users', { username, fullName, role, password:pwd, branchId });
+        toast('User created successfully','success');
       }
-      addAudit(_editUserId?'UPDATE_USER':'CREATE_USER','User',_editUserId||username,`${_editUserId?'Updated':'Created'} ${fullName}`);
-      CM('mUser'); await loadData(); renderUsers();
-      toast(_editUserId?'User updated':'User created','success');
-    }catch(e){ toast('Error: '+e.message,'error'); }
+      CM('mUser');
+      renderUsers();
+    } catch(e){ toast('Error: '+e.message,'error'); }
   } else {
     if(_editUserId){
-      const u=users.find(u=>u.id===_editUserId); if(!u) return;
-      u.fullName=fullName; u.role=role; u.active=active; u.branchId=branchId;
-      if(pwd) hashPwd(pwd).then(h=>{u.passwordHash=h; lsSet(K.users,users);});
-      else lsSet(K.users,users);
+      const u = users.find(u=>u.id===_editUserId);
+      if(!u) return;
+      Object.assign(u, { fullName, role, active, branchId });
+      if(pwd) hashPwd(pwd).then(h=>{ u.passwordHash=h; lsSet(K.users,users); });
+      else lsSet(K.users, users);
     } else {
-      if(!pwd) return toast('Password is required','error');
       if(users.find(u=>u.username===username)) return toast('Username already exists','error');
-      hashPwd(pwd).then(hash=>{ users.push({id:uid(),username,fullName,role,branchId,passwordHash:hash,active,createdAt:today()}); lsSet(K.users,users); });
+      hashPwd(pwd).then(hash=>{
+        users.push({ id:uid(), username, fullName, role, branchId, passwordHash:hash, active, createdAt:today() });
+        lsSet(K.users, users);
+      });
     }
-    addAudit(_editUserId?'UPDATE_USER':'CREATE_USER','User',_editUserId||username,'');
-    CM('mUser'); renderUsers(); toast(_editUserId?'User updated':'User created','success');
+    CM('mUser');
+    renderUsers();
+    toast(_editUserId ? 'User updated' : 'User created','success');
   }
 }
 function deleteUser(id){
@@ -1959,7 +1984,7 @@ function exportCSV(type='all'){
   toast(type==='all'?'All CSV files exported':'CSV exported','success');
 }
 function exportJSON(){
-  const data={exportedAt:new Date().toISOString(),version:'3.1',site:'susenergetica.co.zw/crediconnect',clients,loans,repayments,expenses};
+  const data={exportedAt:new Date().toISOString(),version:'4.1',site:'susenergetica.co.zw/crediconnect',clients,loans,repayments,expenses};
   const a=document.createElement('a');a.href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(data,null,2));a.download=`crediconnect_backup_${today()}.json`;a.click();
   toast('JSON backup downloaded','success');
 }
