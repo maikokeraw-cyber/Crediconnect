@@ -60,11 +60,25 @@ function requireDB(req, res, next) {
   next();
 }
 
-function requireAuth(req, res, next) {
+async function requireAuth(req, res, next) {
   const h = req.headers['authorization'];
   if (!h?.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
-  try { req.user = jwt.verify(h.slice(7), JWT_SECRET); next(); }
-  catch (e) { res.status(401).json({ error: 'Token invalid or expired' }); }
+  try {
+    req.user = jwt.verify(h.slice(7), JWT_SECRET);
+    // If JWT was issued before branchId was added (old token), fetch it from DB now
+    if (!req.user.branchId && !req.user.branch_id && req.user.role !== 'super_admin') {
+      try {
+        const { rows } = await pool.query(
+          'SELECT branch_id FROM users WHERE id=$1 AND active=true', [req.user.id]
+        );
+        req.user.branchId = rows[0]?.branch_id || null;
+        req.user.branch_id = req.user.branchId;
+      } catch(e) { /* pool may not be ready, continue without branch */ }
+    }
+    next();
+  } catch (e) {
+    res.status(401).json({ error: 'Token invalid or expired' });
+  }
 }
 
 function requireRole(...roles) {
@@ -193,7 +207,10 @@ app.post('/api/auth/login', requireDB, async (req, res) => {
       return res.status(401).json({ error: 'Invalid username or password' });
     await pool.query('UPDATE users SET last_login=NOW() WHERE id=$1', [user.id]);
     await audit(user.id, user.username, 'LOGIN', 'User', user.id, 'Signed in');
-    const token = jwt.sign({ id:user.id, username:user.username, fullName:user.full_name, role:user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    const token = jwt.sign(
+      { id:user.id, username:user.username, fullName:user.full_name, role:user.role, branchId:user.branch_id||null },
+      JWT_SECRET, { expiresIn: JWT_EXPIRES }
+    );
     res.json({ token, user: { id:user.id, username:user.username, fullName:user.full_name, role:user.role, branchId:user.branch_id||null } });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
