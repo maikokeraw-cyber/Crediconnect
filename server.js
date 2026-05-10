@@ -19,7 +19,16 @@ const JWT_EXPIRES = process.env.JWT_EXPIRES_IN || '8h';
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+// Serve static files — no cache on HTML so updates always load fresh
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+  }
+}));
 
 // ── PostgreSQL Pool ──────────────────────────────────────────────
 const pool = new Pool({

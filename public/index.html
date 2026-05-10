@@ -424,6 +424,8 @@ input::placeholder{color:var(--text3)}
   </div></div>
   <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mEditRepay')">Cancel</button><button class="btn btn-primary" onclick="saveEditRepayment()">Save Changes</button></div>
 </div></div>
+
+<div class="modal-backdrop" id="mUser"><div class="modal">
   <div class="modal-header"><div class="modal-title" id="mUserTitle">Add User</div><button class="modal-close" onclick="CM('mUser')">×</button></div>
   <div class="modal-body"><div class="form-grid">
     <div class="form-group"><label>Full Name *</label><input id="fUFN" placeholder="Jane Doe"></div>
@@ -777,7 +779,7 @@ function updateStorageInfo(){
   const mode = USE_DB
     ? `<span style="color:var(--green)">● Supabase PostgreSQL</span>`
     : `<span style="color:var(--amber)">● localStorage (offline)</span>`;
-  document.getElementById('storageInfo').innerHTML=`${mode} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
+  document.getElementById('storageInfo').innerHTML=`v4.1 · ${mode} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
 }
 
 // ================================================================
