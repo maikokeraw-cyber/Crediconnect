@@ -474,7 +474,8 @@ let adminFeePayments = lsGet(K.adminFees, []);
 let users      = lsGet(K.users,     []);
 let auditLog   = lsGet(K.audit,     []);
 let branches         = [];
-let activeBranch     = null; // null=all branches, or branch id
+let activeBranch     = null;
+let userList         = []; // null=all branches, or branch id
 
 function lsGet(k,def){ try{const v=localStorage.getItem(k);return v?JSON.parse(v):def;}catch{return def;} }
 function lsSet(k,v){ localStorage.setItem(k,JSON.stringify(v)); }
@@ -514,9 +515,9 @@ async function loadData() {
     [clients, loans, repayments, expenses, adminFeePayments, branches] = await Promise.all([
       apiFetch('GET', '/api/clients'+branchParam()),
       apiFetch('GET', '/api/loans'+branchParam()),
-      apiFetch('GET', '/api/repayments'),
+      apiFetch('GET', '/api/repayments'+branchParam()),
       apiFetch('GET', '/api/expenses'+branchParam()),
-      apiFetch('GET', '/api/admin-fees'),
+      apiFetch('GET', '/api/admin-fees'+branchParam()),
       apiFetch('GET', '/api/branches'),
     ]);
     clients    = clients.map(normaliseClient);
@@ -736,11 +737,24 @@ function getLoanTotal(l){ return l.amount+(l.amount*l.interestRate/100); }
 function getLoanPaid(id){ return repayments.filter(r=>r.loanId===id).reduce((s,r)=>s+r.amount,0); }
 function getLoanBalance(id){ const l=loans.find(l=>l.id===id);if(!l)return 0;return Math.max(0,getLoanTotal(l)-getLoanPaid(id)); }
 // Use balance to determine true status — fixes completed loans showing incorrectly
+function isLoanOverdue(loan){
+  // A loan is overdue if any scheduled payment date has passed
+  // and the total paid is less than what should have been paid by now
+  const amort = buildAmortisation(loan);
+  const todayStr = today();
+  const duePeriods = amort.filter(r=>r.dueDate<=todayStr).length;
+  if(duePeriods===0) return false; // no payments due yet
+  const amountDue = duePeriods * (getLoanTotal(loan)/loan.term);
+  const totalPaid = getLoanPaid(loan.id);
+  return totalPaid < amountDue - 0.005;
+}
 function getLoanStatus(loan){
   const bal=getLoanBalance(loan.id);
   if(loan.status==='defaulted') return 'defaulted';
-  if(bal<=0.005) return 'completed';   // ≤ half a cent = fully paid
-  return loan.status||'active';
+  if(bal<=0.005) return 'completed';
+  if(loan.status!=='active') return loan.status||'active';
+  if(isLoanOverdue(loan)) return 'defaulted';
+  return 'active';
 }
 function termLabel(loan){
   const f=loan.termFrequency||'monthly';

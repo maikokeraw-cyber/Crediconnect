@@ -421,7 +421,14 @@ app.delete('/api/loans/:id', requireAuth, requireDB, requireRole('admin'), async
 // ================================================================
 app.get('/api/repayments', requireAuth, requireDB, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM repayments ORDER BY date DESC');
+    const bfR = getBranchFilter(req.user, req.query);
+    const qry = bfR.value
+      ? `SELECT r.* FROM repayments r
+         JOIN loans l ON l.id = r.loan_id
+         WHERE l.branch_id = $1
+         ORDER BY r.date DESC`
+      : `SELECT r.* FROM repayments r ORDER BY r.date DESC`;
+    const { rows } = await pool.query(qry, bfR.value ? [bfR.value] : []);
     res.json(rows.map(mapRepay));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -508,14 +515,17 @@ app.delete('/api/repayments/:id', requireAuth, requireDB, requireRole('admin'), 
 // ================================================================
 app.get('/api/admin-fees', requireAuth, requireDB, async (req, res) => {
   try {
+    const bfA = getBranchFilter(req.user, req.query);
+    const whereClause = bfA.value ? 'WHERE l.branch_id = $1' : '';
     const { rows } = await pool.query(`
       SELECT af.*, l.amount AS loan_amount, l.client_id,
              c.name AS client_name
       FROM admin_fee_payments af
       JOIN loans l ON l.id = af.loan_id
       JOIN clients c ON c.id = l.client_id
+      ${whereClause}
       ORDER BY af.date DESC
-    `);
+    `, bfA.value ? [bfA.value] : []);
     res.json(rows.map(r => ({
       ...mapAdminFee(r),
       loanAmount: Number(r.loan_amount),
