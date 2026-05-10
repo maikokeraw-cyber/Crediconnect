@@ -82,9 +82,17 @@ function requireRole(...roles) {
 function getBranchFilter(user, query) {
   if (user.role === 'super_admin') {
     const b = query?.branch;
-    return b ? { clause: 'AND branch_id=$', value: b } : { clause: '', value: null };
+    return b ? { value: b } : { value: null };
   }
-  return { clause: 'AND branch_id=$', value: user.branchId || user.branch_id };
+  // Non-super-admin: ALWAYS filter by their own branch from JWT
+  // Never trust query params — always use token branch
+  const branchId = user.branchId || user.branch_id;
+  if (!branchId) {
+    // No branch assigned — return impossible condition so they see nothing
+    // This prevents accidental exposure of all data
+    return { value: 'NO_BRANCH_ASSIGNED' };
+  }
+  return { value: branchId };
 }
 
 async function audit(userId, username, action, entity, entityId, detail, branchId) {
@@ -277,11 +285,6 @@ app.delete('/api/users/:id', requireAuth, requireDB, requireRole('admin'), async
 app.get('/api/clients', requireAuth, requireDB, async (req, res) => {
   try {
     const bf = getBranchFilter(req.user, req.query);
-    const q = bf.value
-      ? `SELECT * FROM clients WHERE 1=1 ${bf.clause}${bf.value ? '1' : ''} ORDER BY date_added DESC`
-      : 'SELECT * FROM clients ORDER BY date_added DESC';
-    const params = bf.value ? [bf.value] : [];
-    // Build proper parameterised query
     const qry = bf.value
       ? 'SELECT * FROM clients WHERE branch_id=$1 ORDER BY date_added DESC'
       : 'SELECT * FROM clients ORDER BY date_added DESC';
@@ -335,7 +338,7 @@ app.put('/api/clients/:id', requireAuth, requireDB, requireRole('admin','loan_of
 app.get('/api/loans', requireAuth, requireDB, async (req, res) => {
   try {
     const bfL = getBranchFilter(req.user, req.query);
-    const branchWhere = bfL.value ? 'WHERE l.branch_id=$1' : '';
+    const branchWhere  = bfL.value ? 'WHERE l.branch_id=$1' : '';
     const branchParams = bfL.value ? [bfL.value] : [];
     // Join with repayments to calculate actual paid amount per loan
     // This ensures status is always correct regardless of what is stored
@@ -432,11 +435,8 @@ app.get('/api/repayments', requireAuth, requireDB, async (req, res) => {
   try {
     const bfR = getBranchFilter(req.user, req.query);
     const qry = bfR.value
-      ? `SELECT r.* FROM repayments r
-         JOIN loans l ON l.id = r.loan_id
-         WHERE l.branch_id = $1
-         ORDER BY r.date DESC`
-      : `SELECT r.* FROM repayments r ORDER BY r.date DESC`;
+      ? 'SELECT r.* FROM repayments r JOIN loans l ON l.id=r.loan_id WHERE l.branch_id=$1 ORDER BY r.date DESC'
+      : 'SELECT r.* FROM repayments r ORDER BY r.date DESC';
     const { rows } = await pool.query(qry, bfR.value ? [bfR.value] : []);
     res.json(rows.map(mapRepay));
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -525,7 +525,7 @@ app.delete('/api/repayments/:id', requireAuth, requireDB, requireRole('admin'), 
 app.get('/api/admin-fees', requireAuth, requireDB, async (req, res) => {
   try {
     const bfA = getBranchFilter(req.user, req.query);
-    const whereClause = bfA.value ? 'WHERE l.branch_id = $1' : '';
+    const whereClause = bfA.value ? 'WHERE l.branch_id=$1' : '';
     const { rows } = await pool.query(`
       SELECT af.*, l.amount AS loan_amount, l.client_id,
              c.name AS client_name

@@ -261,7 +261,11 @@ input::placeholder{color:var(--text3)}
       </div>
       <div class="sidebar-user">
         <div class="sidebar-avatar" id="sbAvatar">?</div>
-        <div class="sidebar-user-info"><div class="sidebar-user-name" id="sbName">—</div><div class="sidebar-user-role" id="sbRole"></div></div>
+        <div class="sidebar-user-info">
+          <div class="sidebar-user-name" id="sbName">—</div>
+          <div class="sidebar-user-role" id="sbRole"></div>
+          <div id="sbBranch" style="font-size:10px;color:var(--gold2);font-weight:600;margin-top:2px;display:none"></div>
+        </div>
         <button class="sidebar-logout" onclick="logout()" title="Sign out">⏻</button>
       </div>
     </nav>
@@ -531,6 +535,12 @@ async function loadData() {
     saveAll();
     updateStorageInfo();
     showBranchSelector();
+    // Update branch name in sidebar now that branches are loaded
+    if(!isSuperAdmin() && currentUser?.branchId){
+      const b = branches.find(b=>b.id===currentUser.branchId);
+      const el = document.getElementById('sbBranch');
+      if(b && el){ el.textContent = '📍 '+b.name+' Branch'; el.style.display='block'; }
+    }
   } catch (e) { if (e.message !== 'Session expired') console.warn('Load error:', e.message); }
 }
 
@@ -597,7 +607,6 @@ function logout(expired){
 function enterApp(){
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('appWrapper').classList.add('visible');
-  // Set branch context based on role
   if(!isSuperAdmin()) activeBranch = currentUser.branchId || null;
   applySidebarRole();
   showBranchSelector();
@@ -605,8 +614,25 @@ function enterApp(){
   document.getElementById('sbName').textContent   = currentUser.fullName;
   document.getElementById('sbRole').textContent   = currentUser.role.replace(/_/g,' ');
   document.getElementById('sbAvatar').textContent = initials(currentUser.fullName);
+  // Show branch name for non-super-admin users
+  const sbBranch = document.getElementById('sbBranch');
+  if(sbBranch){
+    if(!isSuperAdmin() && currentUser.branchId){
+      // Find branch name from branches array or show ID until loaded
+      const showBranchName = () => {
+        const b = branches.find(b=>b.id===currentUser.branchId);
+        if(b){ sbBranch.textContent = '📍 '+b.name+' Branch'; sbBranch.style.display='block'; }
+        else if(currentUser.branchId){ sbBranch.textContent = '📍 Branch'; sbBranch.style.display='block'; }
+      };
+      showBranchName();
+      // Re-try after branches load
+      setTimeout(showBranchName, 2000);
+    } else if(isSuperAdmin()){
+      sbBranch.textContent = '🌐 All Branches';
+      sbBranch.style.display = 'block';
+    }
+  }
   updateStorageInfo();
-  // Loan officer starts on clients, not dashboard
   const startPage = currentUser?.role==='loan_officer' ? 'clients' : 'dashboard';
   navigate(startPage);
 }
