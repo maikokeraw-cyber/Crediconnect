@@ -366,10 +366,14 @@ input::placeholder{color:var(--text3)}
 <div class="modal-backdrop" id="mAddRepay"><div class="modal">
   <div class="modal-header"><div class="modal-title">Record Repayment</div><button class="modal-close" onclick="CM('mAddRepay')">×</button></div>
   <div class="modal-body"><div class="form-grid">
-    <div class="form-group full"><label>Active Loan *</label><select id="fRL" onchange="updateRepayInfo()"><option value="">— Select Loan —</option></select></div>
+    <div class="form-group full"><label>Loan *</label><select id="fRL" onchange="updateRepayInfo()"><option value="">— Select Loan —</option></select></div>
     <div id="fRInfo" style="display:none;grid-column:1/-1;padding:12px;background:var(--surface);border-radius:var(--radius-sm);font-size:12.5px;color:var(--text2);line-height:1.8"></div>
     <div class="form-group"><label>Amount Paid *</label><input id="fRA" type="number" placeholder="500"></div>
     <div class="form-group"><label>Payment Date *</label><input id="fRD" type="date"></div>
+    <div class="form-group" id="fRFineWrap" style="display:none">
+      <label>Fine / Penalty <span style="font-size:10px;color:var(--amber)">(defaulted loan)</span></label>
+      <input id="fRFine" type="number" placeholder="0.00" step="0.01" min="0">
+    </div>
     <div class="form-group full"><label>Notes</label><input id="fRN" placeholder="Cash, Transfer…"></div>
   </div></div>
   <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mAddRepay')">Cancel</button><button class="btn btn-success" onclick="saveRepay()">Record Payment</button></div>
@@ -391,7 +395,7 @@ input::placeholder{color:var(--text3)}
         <option value="">— Select Category —</option>
         <option>Salaries & Wages</option><option>Office Rent</option><option>Utilities</option>
         <option>Transport & Travel</option><option>Marketing & Advertising</option>
-        <option>Office Supplies</option><option>Bank Charges</option><option>Loan Write-offs</option>
+        <option>Office Supplies</option><option>Bank Charges</option><option>Penalty Income</option><option>Loan Write-offs</option>
         <option>IT & Software</option><option>Training & Development</option>
         <option>Maintenance & Repairs</option><option>Other</option>
       </select>
@@ -1387,7 +1391,7 @@ async function openLoanDetail(id){
   document.getElementById('ldFooter').innerHTML=`
     ${can('delete')?`<button class="btn btn-danger btn-sm" onclick="deleteLoan('${freshLoan.id}')">Delete Loan</button>`:''}
     ${can('admin')?`<button class="btn btn-ghost btn-sm" onclick="CM('mLoanDetail');openEditLoan('${freshLoan.id}')">✏️ Edit Loan</button>`:''}
-    ${can('write')?`<button class="btn btn-success btn-sm" onclick="CM('mLoanDetail');openAddRepayForLoan('${freshLoan.id}')">+ Record Payment</button>`:''}
+    ${can('write')&&(status==='active'||status==='defaulted')?`<button class="btn btn-success btn-sm" onclick="CM('mLoanDetail');openAddRepayForLoan('${freshLoan.id}')">+ Record Payment</button>`:''}
     <button class="btn btn-ghost" onclick="CM('mLoanDetail')">Close</button>`;
   OM('mLoanDetail');
 }
@@ -1509,12 +1513,18 @@ function renderRepayments(){
   }).join('');
 }
 function openAddRepay(preselect){
-  const al=loans.filter(l=>getLoanStatus(l)==='active'),sel=document.getElementById('fRL');
-  sel.innerHTML='<option value="">-- Select Active Loan --</option>'+al.map(l=>{const c=clients.find(c=>c.id===l.clientId);const afW='';
-  return`<option value="${l.id}">${c?c.name:'?'} - $${fmt(l.amount)}${afW}</option>`;}).join('');
+  const al=loans.filter(l=>{ const s=getLoanStatus(l); return s==='active'||s==='defaulted'; }),sel=document.getElementById('fRL');
+  sel.innerHTML='<option value="">-- Select Loan --</option>'+al.map(l=>{
+    const c=clients.find(c=>c.id===l.clientId);
+    const s=getLoanStatus(l);
+    const tag=s==='defaulted'?' ⚠️ Defaulted':'';
+    return`<option value="${l.id}">${c?c.name:'?'} - $${fmt(l.amount)}${tag}</option>`;
+  }).join('');
   if(preselect)sel.value=preselect;
   document.getElementById('fRA').value='';document.getElementById('fRN').value='';document.getElementById('fRD').value=today();
   document.getElementById('fRInfo').style.display='none';
+  const fw=document.getElementById('fRFineWrap'); if(fw) fw.style.display='none';
+  if(document.getElementById('fRFine')) document.getElementById('fRFine').value='';
   setMaxDate('fRD');
   if(preselect)updateRepayInfo();
   OM('mAddRepay');
@@ -1522,11 +1532,20 @@ function openAddRepay(preselect){
 function openAddRepayForLoan(id){openAddRepay(id);}
 function updateRepayInfo(){
   const id=document.getElementById('fRL').value,info=document.getElementById('fRInfo');
-  if(!id){info.style.display='none';return;}
+  if(!id){
+    info.style.display='none';
+    const fw=document.getElementById('fRFineWrap'); if(fw) fw.style.display='none';
+    return;
+  }
   const loan=loans.find(l=>l.id===id),c=loan?clients.find(c=>c.id===loan.clientId):null;
   const bal=getLoanBalance(id),periodic=getLoanTotal(loan)/loan.term;
+  const isDefaulted=getLoanStatus(loan)==='defaulted';
+  // Show fine field only for defaulted loans
+  const fw=document.getElementById('fRFineWrap');
+  if(fw){ fw.style.display=isDefaulted?'':'none'; }
+  if(document.getElementById('fRFine')) document.getElementById('fRFine').value='';
   info.style.display='block';
-  info.innerHTML='<strong style="color:var(--text)">'+(c?.name||'')+'</strong> $'+fmt(loan.amount)+' @ '+loan.interestRate+'% Balance: <strong style="color:var(--red)">$'+fmt(bal)+'</strong> Suggested: <strong style="color:var(--green)">$'+fmt(periodic)+'</strong>';
+  info.innerHTML='<strong style="color:var(--text)">'+(c?.name||'')+'</strong> $'+fmt(loan.amount)+' @ '+loan.interestRate+'% &nbsp;·&nbsp; Balance: <strong style="color:var(--red)">$'+fmt(bal)+'</strong> &nbsp;·&nbsp; Suggested: <strong style="color:var(--green)">$'+fmt(periodic)+'</strong>'+(isDefaulted?'<br><span style="color:var(--amber)">⚠️ Defaulted — you can add a fine/penalty amount below</span>':'');
   document.getElementById('fRA').value=Math.round(periodic);
 }
 async function saveRepay(){
@@ -1535,6 +1554,8 @@ async function saveRepay(){
   const dateErrR=validateDate(date,'Payment date'); if(dateErrR)return toast(dateErrR,'error');
   const loan=loans.find(l=>l.id===loanId);
   if(!loan) return toast('Loan not found','error');
+  const fine=parseFloat(document.getElementById('fRFine')?.value)||0;
+  const isDefaulted=getLoanStatus(loan)==='defaulted';
   const hasUnpaidAF=false; // Admin fees are always retained at disbursement
   if(hasUnpaidAF){
     const adminFee=loan.adminFees;
@@ -1562,10 +1583,27 @@ async function saveRepay(){
     }catch(e){toast('Error: '+e.message,'error');}
     return;
   }
-  addRepayment({loanId,amount,date,notes:document.getElementById('fRN').value.trim()}).then(r=>{
+  const notes=document.getElementById('fRN').value.trim();
+  addRepayment({loanId,amount,date,notes}).then(async r=>{
     if(!repayments.find(rp=>rp.id===r.id)){repayments.push(r);const l2=loans.find(l=>l.id===loanId);if(l2&&getLoanBalance(loanId)<=0)l2.status='completed';saveAll();}
     addAudit('RECORD_REPAYMENT','Repayment',r.id,'$'+amount);
-    CM('mAddRepay');renderRepayments();updateStorageInfo();toast('Payment of $'+fmt(amount)+' recorded','success');
+    // Record fine as income if applicable
+    if(fine>0 && isDefaulted){
+      const c=clients.find(c=>c.id===loan.clientId);
+      await addExpenseData({
+        amount:fine,
+        category:'Penalty Income',
+        description:'Fine on defaulted loan — '+(c?c.name:'client')+' ($'+fmt(loan.amount)+')',
+        date,
+        branchId:myBranchId()
+      }).catch(()=>{});
+      addAudit('RECORD_FINE','Fine',loanId,'$'+fine+' fine on defaulted loan');
+      CM('mAddRepay');renderRepayments();updateStorageInfo();
+      toast('Payment $'+fmt(amount)+' + Fine $'+fmt(fine)+' recorded','success');
+    } else {
+      CM('mAddRepay');renderRepayments();updateStorageInfo();
+      toast('Payment of $'+fmt(amount)+' recorded','success');
+    }
   }).catch(e=>toast('Error: '+e.message,'error'));
 }
 function deleteRepayment(id){
@@ -1587,7 +1625,7 @@ async function handleDeleteAdminFee(id){
 // ================================================================
 //  EXPENSES
 // ================================================================
-const EXP_COLORS={'Salaries & Wages':'#4a8df5','Office Rent':'#a855f7','Utilities':'#f0a832','Transport & Travel':'#27c97a','Marketing & Advertising':'#e8b84b','Office Supplies':'#06b6d4','Bank Charges':'#e85454','Loan Write-offs':'#ef4444','IT & Software':'#3b82f6','Training & Development':'#10b981','Maintenance & Repairs':'#8b5cf6','Other':'#8a9bc0'};
+const EXP_COLORS={'Salaries & Wages':'#4a8df5','Office Rent':'#a855f7','Utilities':'#f0a832','Transport & Travel':'#27c97a','Marketing & Advertising':'#e8b84b','Office Supplies':'#06b6d4','Bank Charges':'#e85454','Penalty Income':'#f97316','Loan Write-offs':'#ef4444','IT & Software':'#3b82f6','Training & Development':'#10b981','Maintenance & Repairs':'#8b5cf6','Other':'#8a9bc0'};
 
 function renderExpenses(){
   const q=(document.getElementById('expSrch')?.value||'').toLowerCase(),cf=document.getElementById('expCF')?.value||'';
