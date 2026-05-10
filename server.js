@@ -60,23 +60,36 @@ function requireAuth(req, res, next) {
 
 function requireRole(...roles) {
   return (req, res, next) => {
+    // super_admin bypasses all role checks
+    if (req.user?.role === 'super_admin') { next(); return; }
     if (!roles.includes(req.user?.role)) return res.status(403).json({ error: 'Insufficient permissions' });
     next();
   };
 }
 
-async function audit(userId, username, action, entity, entityId, detail) {
+// Returns branch filter clause for SQL queries
+// super_admin can pass ?branch=id to filter, or gets all
+// other roles always see only their branch
+function getBranchFilter(user, query) {
+  if (user.role === 'super_admin') {
+    const b = query?.branch;
+    return b ? { clause: 'AND branch_id=$', value: b } : { clause: '', value: null };
+  }
+  return { clause: 'AND branch_id=$', value: user.branchId || user.branch_id };
+}
+
+async function audit(userId, username, action, entity, entityId, detail, branchId) {
   try {
     await pool.query(
-      `INSERT INTO audit_log (user_id, username, action, entity, entity_id, detail)
-       VALUES ($1,$2,$3,$4,$5,$6)`,
-      [userId||null, username||null, action, entity||null, entityId||null, detail||null]
+      `INSERT INTO audit_log (user_id, username, branch_id, action, entity, entity_id, detail)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [userId||null, username||null, branchId||null, action, entity||null, entityId||null, detail||null]
     );
   } catch (_) {}
 }
 
 // ── Row mappers ──────────────────────────────────────────────────
-const mapClient = r => ({ id:r.id, name:r.name, phone:r.phone, nationalId:r.national_id||'', email:r.email||'', address:r.address||'', occupation:r.occupation||'', dob:r.dob?r.dob.toISOString().slice(0,10):'', dateAdded:r.date_added?r.date_added.toISOString().slice(0,10):'', addedBy:r.added_by||'' });
+const mapClient = r => ({ id:r.id, name:r.name, phone:r.phone, nationalId:r.national_id||'', email:r.email||'', address:r.address||'', occupation:r.occupation||'', dob:r.dob?r.dob.toISOString().slice(0,10):'', dateAdded:r.date_added?r.date_added.toISOString().slice(0,10):'', addedBy:r.added_by||'', branchId:r.branch_id||'' });
 const mapLoan = (r, totalPaid) => {
   const amount      = Number(r.amount);
   const rate        = Number(r.interest_rate);
@@ -93,12 +106,55 @@ const mapLoan = (r, totalPaid) => {
     purpose: r.purpose || '', notes: r.notes || '',
     adminFees: Number(r.admin_fees || 0),
     adminFeesStatus: r.admin_fees_status || 'none',
-    status: computedStatus, addedBy: r.added_by || ''
+    status: computedStatus, addedBy: r.added_by || '', branchId: r.branch_id || ''
   };
 };
 const mapAdminFee = r => ({ id:r.id, loanId:r.loan_id, amount:Number(r.amount), date:r.date?r.date.toISOString().slice(0,10):'', notes:r.notes||'', addedBy:r.added_by||'' });
 const mapRepay  = r => ({ id:r.id, loanId:r.loan_id, amount:Number(r.amount), date:r.date?r.date.toISOString().slice(0,10):'', notes:r.notes||'', addedBy:r.added_by||'' });
-const mapExp    = r => ({ id:r.id, amount:Number(r.amount), category:r.category||'', description:r.description||'', date:r.date?r.date.toISOString().slice(0,10):'', addedBy:r.added_by||'' });
+const mapExp    = r => ({ id:r.id, amount:Number(r.amount), category:r.category||'', description:r.description||'', date:r.date?r.date.toISOString().slice(0,10):'', addedBy:r.added_by||'', branchId:r.branch_id||'' });
+
+// ================================================================
+//  BRANCHES
+// ================================================================
+app.get('/api/branches', requireAuth, requireDB, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM branches ORDER BY name ASC');
+    res.json(rows.map(b => ({ id:b.id, name:b.name, active:b.active, createdAt:b.created_at })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/branches', requireAuth, requireDB, requireRole('super_admin'), async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ error: 'Branch name required' });
+    const id = uuidv4();
+    await pool.query('INSERT INTO branches (id,name) VALUES ($1,$2)', [id, name]);
+    await audit(req.user.id, req.user.username, 'CREATE_BRANCH', 'Branch', id, `Created branch ${name}`);
+    res.status(201).json({ id, name, active: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/branches/:id', requireAuth, requireDB, requireRole('super_admin'), async (req, res) => {
+  try {
+    const { name, active } = req.body;
+    await pool.query('UPDATE branches SET name=$1,active=$2 WHERE id=$3', [name, active !== false, req.params.id]);
+    await audit(req.user.id, req.user.username, 'UPDATE_BRANCH', 'Branch', req.params.id, `Updated to ${name}`);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Transfer client to another branch
+app.put('/api/clients/:id/branch', requireAuth, requireDB, requireRole('super_admin'), async (req, res) => {
+  try {
+    const { branchId } = req.body;
+    if (!branchId) return res.status(400).json({ error: 'branchId required' });
+    await pool.query('UPDATE clients SET branch_id=$1,updated_at=NOW() WHERE id=$2', [branchId, req.params.id]);
+    // Also transfer all their loans and expenses to new branch
+    await pool.query('UPDATE loans SET branch_id=$1,updated_at=NOW() WHERE client_id=$2', [branchId, req.params.id]);
+    await audit(req.user.id, req.user.username, 'TRANSFER_CLIENT', 'Client', req.params.id, `Transferred to branch ${branchId}`);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 // ================================================================
 //  STATUS
@@ -121,7 +177,7 @@ app.post('/api/auth/login', requireDB, async (req, res) => {
     await pool.query('UPDATE users SET last_login=NOW() WHERE id=$1', [user.id]);
     await audit(user.id, user.username, 'LOGIN', 'User', user.id, 'Signed in');
     const token = jwt.sign({ id:user.id, username:user.username, fullName:user.full_name, role:user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
-    res.json({ token, user: { id:user.id, username:user.username, fullName:user.full_name, role:user.role } });
+    res.json({ token, user: { id:user.id, username:user.username, fullName:user.full_name, role:user.role, branchId:user.branch_id||null } });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -130,7 +186,7 @@ app.get('/api/auth/me', requireAuth, requireDB, async (req, res) => {
     const { rows } = await pool.query('SELECT id,username,full_name,role,last_login FROM users WHERE id=$1 AND active=TRUE', [req.user.id]);
     if (!rows.length) return res.status(401).json({ error: 'User not found' });
     const u = rows[0];
-    res.json({ id:u.id, username:u.username, fullName:u.full_name, role:u.role, lastLogin:u.last_login });
+    res.json({ id:u.id, username:u.username, fullName:u.full_name, role:u.role, branchId:u.branch_id||null, lastLogin:u.last_login });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -159,22 +215,23 @@ app.post('/api/auth/change-password', requireAuth, requireDB, async (req, res) =
 // ================================================================
 app.get('/api/users', requireAuth, requireDB, requireRole('admin'), async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT id,username,full_name,role,active,last_login,created_at FROM users ORDER BY created_at DESC');
-    res.json(rows.map(u => ({ id:u.id, username:u.username, fullName:u.full_name, role:u.role, active:u.active, lastLogin:u.last_login, createdAt:u.created_at })));
+    const { rows } = await pool.query(`SELECT u.id,u.username,u.full_name,u.role,u.branch_id,u.active,u.last_login,u.created_at,b.name as branch_name FROM users u LEFT JOIN branches b ON b.id=u.branch_id ORDER BY u.created_at DESC`);
+    res.json(rows.map(u => ({ id:u.id, username:u.username, fullName:u.full_name, role:u.role, branchId:u.branch_id||null, branchName:u.branch_name||null, active:u.active, lastLogin:u.last_login, createdAt:u.created_at })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/users', requireAuth, requireDB, requireRole('admin'), async (req, res) => {
   try {
-    const { username, fullName, role, password } = req.body;
+    const { username, fullName, role, password, branchId } = req.body;
     if (!username || !fullName || !role || !password) return res.status(400).json({ error: 'All fields required' });
+    if (role !== 'super_admin' && !branchId) return res.status(400).json({ error: 'Branch is required for non-super-admin users' });
     if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
     const exists = await pool.query('SELECT 1 FROM users WHERE LOWER(username)=$1', [username.toLowerCase()]);
     if (exists.rows.length) return res.status(409).json({ error: 'Username already exists' });
     const id = uuidv4();
     await pool.query(
-      `INSERT INTO users (id,username,full_name,role,password_hash,created_by) VALUES ($1,$2,$3,$4,$5,$6)`,
-      [id, username.toLowerCase().trim(), fullName, role, await bcrypt.hash(password, 10), req.user.id]
+      `INSERT INTO users (id,username,full_name,role,branch_id,password_hash,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [id, username.toLowerCase().trim(), fullName, role, branchId||null, await bcrypt.hash(password, 10), req.user.id]
     );
     await audit(req.user.id, req.user.username, 'CREATE_USER', 'User', id, `Created ${username} role=${role}`);
     res.status(201).json({ id, username: username.toLowerCase(), fullName, role, active: true });
@@ -183,13 +240,13 @@ app.post('/api/users', requireAuth, requireDB, requireRole('admin'), async (req,
 
 app.put('/api/users/:id', requireAuth, requireDB, requireRole('admin'), async (req, res) => {
   try {
-    const { fullName, role, active, password } = req.body;
+    const { fullName, role, active, password, branchId } = req.body;
     if (req.params.id === req.user.id && active === false) return res.status(400).json({ error: 'Cannot deactivate your own account' });
     if (password) {
       if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
-      await pool.query('UPDATE users SET full_name=$1,role=$2,active=$3,password_hash=$4 WHERE id=$5', [fullName, role, active !== false, await bcrypt.hash(password, 10), req.params.id]);
+      await pool.query('UPDATE users SET full_name=$1,role=$2,active=$3,branch_id=$4,password_hash=$5 WHERE id=$6', [fullName, role, active !== false, branchId||null, await bcrypt.hash(password, 10), req.params.id]);
     } else {
-      await pool.query('UPDATE users SET full_name=$1,role=$2,active=$3 WHERE id=$4', [fullName, role, active !== false, req.params.id]);
+      await pool.query('UPDATE users SET full_name=$1,role=$2,active=$3,branch_id=$4 WHERE id=$5', [fullName, role, active !== false, branchId||null, req.params.id]);
     }
     await audit(req.user.id, req.user.username, 'UPDATE_USER', 'User', req.params.id, `role=${role} active=${active}`);
     res.json({ success: true });
@@ -210,20 +267,31 @@ app.delete('/api/users/:id', requireAuth, requireDB, requireRole('admin'), async
 // ================================================================
 app.get('/api/clients', requireAuth, requireDB, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM clients ORDER BY date_added DESC');
+    const bf = getBranchFilter(req.user, req.query);
+    const q = bf.value
+      ? `SELECT * FROM clients WHERE 1=1 ${bf.clause}${bf.value ? '1' : ''} ORDER BY date_added DESC`
+      : 'SELECT * FROM clients ORDER BY date_added DESC';
+    const params = bf.value ? [bf.value] : [];
+    // Build proper parameterised query
+    const qry = bf.value
+      ? 'SELECT * FROM clients WHERE branch_id=$1 ORDER BY date_added DESC'
+      : 'SELECT * FROM clients ORDER BY date_added DESC';
+    const { rows } = await pool.query(qry, bf.value ? [bf.value] : []);
     res.json(rows.map(mapClient));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/clients', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
   try {
-    const { name, phone, nationalId, email, address, occupation, dob, dateAdded } = req.body;
+    const { name, phone, nationalId, email, address, occupation, dob, dateAdded, branchId } = req.body;
     if (!name || !phone) return res.status(400).json({ error: 'Name and phone required' });
     const id = uuidv4();
+    // Use provided branchId, or user's branch, or null for super_admin with no selection
+    const clientBranch = branchId || req.user.branchId || req.user.branch_id || null;
     await pool.query(
-      `INSERT INTO clients (id,name,phone,national_id,email,address,occupation,dob,date_added,added_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [id, name, phone, nationalId||null, email||null, address||null, occupation||null, dob||null, dateAdded||new Date(), req.user.id]
+      `INSERT INTO clients (id,name,phone,national_id,email,address,occupation,dob,date_added,branch_id,added_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [id, name, phone, nationalId||null, email||null, address||null, occupation||null, dob||null, dateAdded||new Date(), clientBranch, req.user.id]
     );
     await audit(req.user.id, req.user.username, 'ADD_CLIENT', 'Client', id, `Added ${name}`);
     const { rows } = await pool.query('SELECT * FROM clients WHERE id=$1', [id]);
@@ -257,6 +325,9 @@ app.put('/api/clients/:id', requireAuth, requireDB, requireRole('admin','loan_of
 // ================================================================
 app.get('/api/loans', requireAuth, requireDB, async (req, res) => {
   try {
+    const bfL = getBranchFilter(req.user, req.query);
+    const branchWhere = bfL.value ? 'WHERE l.branch_id=$1' : '';
+    const branchParams = bfL.value ? [bfL.value] : [];
     // Join with repayments to calculate actual paid amount per loan
     // This ensures status is always correct regardless of what is stored
     const { rows } = await pool.query(`
@@ -268,8 +339,9 @@ app.get('/api/loans', requireAuth, requireDB, async (req, res) => {
         FROM repayments
         GROUP BY loan_id
       ) p ON p.loan_id = l.id
+      ${branchWhere}
       ORDER BY l.start_date DESC
-    `);
+    `, branchParams);
     // Also fix any wrong statuses in DB silently in the background
     const fixes = rows.filter(r => {
       if (r.status === 'defaulted') return false;
@@ -294,14 +366,14 @@ app.get('/api/loans', requireAuth, requireDB, async (req, res) => {
 
 app.post('/api/loans', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
   try {
-    const { clientId, amount, interestRate, term, termFrequency, startDate, purpose, notes, adminFees, adminFeesPaid } = req.body;
+    const { clientId, amount, interestRate, term, termFrequency, startDate, purpose, notes, adminFees, adminFeesPaid, branchId } = req.body;
     if (!clientId || !amount || !interestRate || !term || !startDate) return res.status(400).json({ error: 'Missing required fields' });
     const id = uuidv4();
     const adminFeesStatus = adminFees > 0 ? 'paid' : 'none'; // Always retained at disbursement
     await pool.query(
-      `INSERT INTO loans (id,client_id,amount,interest_rate,term,term_frequency,start_date,purpose,notes,admin_fees,admin_fees_status,added_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-      [id, clientId, amount, interestRate, term, termFrequency||'monthly', startDate, purpose||null, notes||null, adminFees||0, adminFeesStatus, req.user.id]
+      `INSERT INTO loans (id,client_id,amount,interest_rate,term,term_frequency,start_date,purpose,notes,admin_fees,admin_fees_status,branch_id,added_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [id, clientId, amount, interestRate, term, termFrequency||'monthly', startDate, purpose||null, notes||null, adminFees||0, adminFeesStatus, branchId||req.user.branchId||req.user.branch_id||null, req.user.id]
     );
     // Always record admin fee as retained at disbursement
     if (adminFees > 0) {
@@ -485,19 +557,22 @@ app.delete('/api/admin-fees/:id', requireAuth, requireDB, requireRole('admin'), 
 // ================================================================
 app.get('/api/expenses', requireAuth, requireDB, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM expenses ORDER BY date DESC');
+    const bfe = getBranchFilter(req.user, req.query);
+    const qry = bfe.value ? 'SELECT * FROM expenses WHERE branch_id=$1 ORDER BY date DESC' : 'SELECT * FROM expenses ORDER BY date DESC';
+    const { rows } = await pool.query(qry, bfe.value ? [bfe.value] : []);
     res.json(rows.map(mapExp));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/expenses', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
   try {
-    const { amount, category, description, date } = req.body;
+    const { amount, category, description, date, branchId } = req.body;
     if (!amount || !category || !date) return res.status(400).json({ error: 'amount, category and date required' });
     const id = uuidv4();
+    const expBranch = branchId || req.user.branchId || req.user.branch_id || null;
     await pool.query(
-      `INSERT INTO expenses (id,amount,category,description,date,added_by) VALUES ($1,$2,$3,$4,$5,$6)`,
-      [id, amount, category, description||null, date, req.user.id]
+      `INSERT INTO expenses (id,amount,category,description,date,branch_id,added_by) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [id, amount, category, description||null, date, expBranch, req.user.id]
     );
     await audit(req.user.id, req.user.username, 'ADD_EXPENSE', 'Expense', id, `$${amount} — ${category}`);
     const { rows } = await pool.query('SELECT * FROM expenses WHERE id=$1', [id]);

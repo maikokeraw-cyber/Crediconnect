@@ -223,10 +223,17 @@ input::placeholder{color:var(--text3)}
 <!-- APP -->
 <div id="appWrapper">
   <div class="storage-info">
+  <div class="storage-info">
     <span class="storage-badge">Browser Storage</span>
     <span id="storageInfo">Loading…</span>
+    <div id="branchSelectorWrap" style="display:none;align-items:center;gap:8px;margin-left:16px">
+      <span style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;white-space:nowrap">Branch</span>
+      <select id="branchSelector" onchange="onBranchChange()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:3px 8px;font-size:12px;cursor:pointer;min-width:120px">
+        <option value="">All Branches</option>
+      </select>
+    </div>
     <div style="flex:1"></div>
-    <button class="btn btn-ghost btn-sm" onclick="exportCSV('all')">⬇ Export CSV</button>
+    <button class="btn btn-ghost btn-sm" onclick="exportCSV('all')">&#x2B07; Export CSV</button>
   </div>
   <div id="appLayout">
     <nav id="sidebar">
@@ -459,6 +466,8 @@ let expenses         = lsGet(K.expenses,  []);
 let adminFeePayments = lsGet(K.adminFees, []);
 let users      = lsGet(K.users,     []);
 let auditLog   = lsGet(K.audit,     []);
+let branches         = [];
+let activeBranch     = null; // null=all branches, or branch id
 
 function lsGet(k,def){ try{const v=localStorage.getItem(k);return v?JSON.parse(v):def;}catch{return def;} }
 function lsSet(k,v){ localStorage.setItem(k,JSON.stringify(v)); }
@@ -495,14 +504,23 @@ async function checkServer() {
 async function loadData() {
   if (!USE_DB || !authToken) return;
   try {
-    [clients, loans, repayments, expenses] = await Promise.all([
-      apiFetch('GET', '/api/clients'),
-      apiFetch('GET', '/api/loans'),
+    [clients, loans, repayments, expenses, adminFeePayments, branches] = await Promise.all([
+      apiFetch('GET', '/api/clients'+branchParam()),
+      apiFetch('GET', '/api/loans'+branchParam()),
       apiFetch('GET', '/api/repayments'),
-      apiFetch('GET', '/api/expenses'),
+      apiFetch('GET', '/api/expenses'+branchParam()),
+      apiFetch('GET', '/api/admin-fees'),
+      apiFetch('GET', '/api/branches'),
     ]);
+    clients    = clients.map(normaliseClient);
+    loans      = loans.map(normaliseLoan);
+    repayments = repayments.map(normaliseRepayment);
+    expenses   = expenses.map(normaliseExpense);
+    adminFeePayments = adminFeePayments.map(r=>({id:r.id,loanId:r.loanId||r.loan_id,amount:Number(r.amount),date:(r.date||'').slice(0,10),notes:r.notes||'',addedBy:r.addedBy||'',clientName:r.clientName||'',loanAmount:Number(r.loanAmount||0)}));
+    if(Array.isArray(branches)) branches = branches.map(b=>({id:b.id,name:b.name,active:b.active}));
     saveAll();
     updateStorageInfo();
+    showBranchSelector();
   } catch (e) { if (e.message !== 'Session expired') console.warn('Load error:', e.message); }
 }
 
@@ -583,11 +601,31 @@ function enterApp(){
 function can(action){
   if (!currentUser) return false;
   const r = currentUser.role;
+  if (r==='super_admin') return true;
   if (action==='read')   return true;
   if (action==='write')  return r==='admin' || r==='loan_officer';
   if (action==='delete') return r==='admin';
   if (action==='admin')  return r==='admin';
   return false;
+}
+function isSuperAdmin(){ return currentUser?.role==='super_admin'; }
+function branchParam(){
+  if(isSuperAdmin()) return activeBranch?`?branch=${activeBranch}`:'';
+  return currentUser?.branchId?`?branch=${currentUser.branchId}`:'';
+}
+function myBranchId(){
+  if(isSuperAdmin()) return activeBranch||null;
+  return currentUser?.branchId||null;
+}
+function toggleBranchField(){
+  const role=document.getElementById('mURole')?.value;
+  const wrap=document.getElementById('mUBranchWrap');
+  if(wrap) wrap.style.display=role==='super_admin'?'none':'';
+}
+function populateBranchDropdown(selId, selectedId){
+  const sel=document.getElementById(selId); if(!sel) return;
+  sel.innerHTML='<option value="">-- Select Branch --</option>'+branches.filter(b=>b.active).map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
+  if(selectedId) sel.value=selectedId;
 }
 function applySidebarRole(){
   document.querySelectorAll('.nav-admin').forEach(el=>el.style.display=can('admin')?'':'none');
@@ -735,11 +773,100 @@ function navigate(page){
   }
 }
 
+
+// ================================================================
+//  BRANCH MANAGEMENT
+// ================================================================
+function onBranchChange(){
+  activeBranch = document.getElementById('branchSelector').value || null;
+  // Reload all data with new branch filter
+  if(USE_DB){ loadData().then(()=>{ navigate(currentPage||'dashboard'); }); }
+  else { navigate(currentPage||'dashboard'); }
+}
+
+function showBranchSelector(){
+  if(!isSuperAdmin()) return;
+  const wrap = document.getElementById('branchSelectorWrap');
+  if(!wrap) return;
+  wrap.style.display='flex';
+  const sel = document.getElementById('branchSelector');
+  const cur = sel.value;
+  sel.innerHTML='<option value="">All Branches</option>'+branches.filter(b=>b.active).map(b=>`<option value="${b.id}">${b.name}</option>`).join('');
+  sel.value = activeBranch||'';
+}
+
+function renderBranchManagement(){
+  if(!isSuperAdmin()){ toast('Access denied','error'); return; }
+  const pg=document.getElementById('page-users');
+  const branchHtml=`
+    <div style="margin-bottom:24px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <h3 style="font-size:15px;font-weight:600">Branch Management</h3>
+        <button class="btn btn-primary btn-sm" onclick="openAddBranch()">+ Add Branch</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px">
+        ${branches.map(b=>`
+          <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <span style="font-weight:600;font-size:14px">${b.name}</span>
+              <span class="badge badge-${b.active?'active':'defaulted'}">${b.active?'Active':'Inactive'}</span>
+            </div>
+            <div style="font-size:12px;color:var(--text3);margin-bottom:12px">
+              ${clients.filter(c=>c.branchId===b.id).length} clients &nbsp;·&nbsp;
+              ${loans.filter(l=>l.branchId===b.id).length} loans
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-ghost btn-sm" onclick="activeBranch='${b.id}';document.getElementById('branchSelector').value='${b.id}';onBranchChange()">View Branch</button>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  pg.innerHTML = branchHtml + pg.innerHTML;
+}
+
+function openAddBranch(){
+  const name = prompt('Branch name:');
+  if(!name||!name.trim()) return;
+  if(USE_DB){
+    apiFetch('POST','/api/branches',{name:name.trim()}).then(b=>{
+      branches.push(b); showBranchSelector(); toast('Branch '+b.name+' created','success');
+    }).catch(e=>toast('Error: '+e.message,'error'));
+  } else {
+    branches.push({id:uid(),name:name.trim(),active:true});
+    showBranchSelector(); toast('Branch created (offline)','success');
+  }
+}
+
+// Transfer client to another branch
+function openTransferClient(clientId){
+  if(!isSuperAdmin()) return;
+  const activeBranches = branches.filter(b=>b.active);
+  const opts = activeBranches.map(b=>`${b.id}:${b.name}`).join('|');
+  const chosen = prompt('Transfer to branch:\n'+activeBranches.map((b,i)=>`${i+1}. ${b.name}`).join('\n')+'\n\nEnter branch number:');
+  const idx = parseInt(chosen)-1;
+  if(isNaN(idx)||idx<0||idx>=activeBranches.length) return toast('Invalid selection','error');
+  const branch = activeBranches[idx];
+  if(!confirm('Transfer client and all their loans to '+branch.name+'?')) return;
+  if(USE_DB){
+    apiFetch('PUT',`/api/clients/${clientId}/branch`,{branchId:branch.id}).then(()=>{
+      const c=clients.find(c=>c.id===clientId); if(c) c.branchId=branch.id;
+      loans.filter(l=>l.clientId===clientId).forEach(l=>l.branchId=branch.id);
+      saveAll(); CM('mClientDetail'); renderClients();
+      toast('Client transferred to '+branch.name,'success');
+    }).catch(e=>toast('Error: '+e.message,'error'));
+  } else {
+    const c=clients.find(c=>c.id===clientId); if(c) c.branchId=branch.id;
+    loans.filter(l=>l.clientId===clientId).forEach(l=>l.branchId=branch.id);
+    saveAll(); CM('mClientDetail'); renderClients();
+    toast('Client transferred to '+branch.name,'success');
+  }
+}
+
 // ================================================================
 //  DASHBOARD
 // ================================================================
 function renderDashboard(){
-  const al=loans.filter(l=>l.status==='active');
+  const al=loans.filter(l=>getLoanStatus(l)==='active');
   const td=loans.reduce((s,l)=>s+l.amount,0),tc=repayments.reduce((s,r)=>s+r.amount,0);
   const te=expenses.reduce((s,e)=>s+e.amount,0),to=al.reduce((s,l)=>s+getLoanBalance(l.id),0);
 
@@ -810,7 +937,7 @@ function renderDashboard(){
       <div class="card"><div class="card-header"><span class="card-title">Recent Clients</span><button class="btn btn-ghost btn-sm" onclick="navigate('clients')">View All →</button></div>
         <div class="table-wrap"><table><thead><tr><th>Client</th><th>Phone</th><th>Loans</th><th>Joined</th></tr></thead><tbody>${
           [...clients].sort((a,b)=>b.dateAdded.localeCompare(a.dateAdded)).slice(0,5).map(c=>{
-            const a=clientLoans(c.id).filter(l=>l.status==='active').length;
+            const a=clientLoans(c.id).filter(l=>getLoanStatus(l)==='active').length;
             return `<tr onclick="openClientDetail('${c.id}')"><td class="primary"><div class="name-cell"><div class="avatar" style="background:${avatarColor(c.name)}">${initials(c.name)}</div>${c.name}</div></td><td>${c.phone}</td><td>${a?`<span class="badge badge-active">${a}</span>`:'<span style="color:var(--text3)">None</span>'}</td><td>${fmtDate(c.dateAdded)}</td></tr>`;
           }).join('')||'<tr><td colspan="4" style="padding:20px;text-align:center;color:var(--text3)">No clients yet</td></tr>'
         }</tbody></table></div>
@@ -826,7 +953,7 @@ function renderDashboard(){
       </div></div>
     </div>`;
   setTimeout(()=>{
-    const st={active:0,completed:0,defaulted:0};loans.forEach(l=>st[l.status]=(st[l.status]||0)+1);
+    const st={active:0,completed:0,defaulted:0};loans.forEach(l=>{const s=getLoanStatus(l);st[s]=(st[s]||0)+1;});
     if(charts.p)charts.p.destroy();
     charts.p=new Chart(document.getElementById('cPortfolio'),{type:'doughnut',data:{labels:['Active','Completed','Defaulted'],datasets:[{data:[st.active,st.completed,st.defaulted],backgroundColor:['#27c97a','#4a8df5','#e85454'],borderWidth:0,hoverOffset:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#8a9bc0',font:{size:12}}}}}});
     const ml=[],ma=[];for(let i=5;i>=0;i--){const d=new Date();d.setMonth(d.getMonth()-i);const ms=d.toISOString().slice(0,7);ml.push(d.toLocaleString('en',{month:'short'}));ma.push(repayments.filter(r=>r.date&&r.date.startsWith(ms)).reduce((s,r)=>s+r.amount,0));}
@@ -841,12 +968,12 @@ function renderDashboard(){
 function renderClients(){
   const q=(document.getElementById('clientSearch')?.value||'').toLowerCase(),f=document.getElementById('clientFilter')?.value||'';
   let data=clients.filter(c=>!q||c.name.toLowerCase().includes(q)||c.phone.includes(q)||(c.nationalId||'').toLowerCase().includes(q));
-  if(f==='active')data=data.filter(c=>clientLoans(c.id).some(l=>l.status==='active'));
+  if(f==='active')data=data.filter(c=>clientLoans(c.id).some(l=>getLoanStatus(l)==='active'));
   if(f==='no-loan')data=data.filter(c=>clientLoans(c.id).length===0);
   const tb=document.getElementById('clientsTbody');
   if(!data.length){tb.innerHTML=`<tr><td colspan="7"><div class="empty-state"><div class="emoji">👥</div><p>No clients found</p></div></td></tr>`;return;}
   tb.innerHTML=data.map(c=>{
-    const al=clientLoans(c.id).filter(l=>l.status==='active').length,bor=clientLoans(c.id).reduce((s,l)=>s+l.amount,0);
+    const al=clientLoans(c.id).filter(l=>getLoanStatus(l)==='active').length,bor=clientLoans(c.id).reduce((s,l)=>s+l.amount,0);
     return `<tr onclick="openClientDetail('${c.id}')">
       <td class="primary"><div class="name-cell"><div class="avatar" style="background:${avatarColor(c.name)}">${initials(c.name)}</div>${c.name}</div></td>
       <td>${c.phone}</td><td style="font-family:'DM Mono',monospace;font-size:12px">${c.nationalId||'—'}</td>
@@ -864,7 +991,7 @@ function openAddClient(){
 function saveClient(){
   const name=document.getElementById('fCN').value.trim(),phone=document.getElementById('fCP').value.trim();
   if(!name||!phone)return toast('Name and phone are required','error');
-  const data={name,phone,nationalId:document.getElementById('fCI').value.trim(),email:document.getElementById('fCE').value.trim(),address:document.getElementById('fCA').value.trim(),occupation:document.getElementById('fCO').value.trim(),dob:document.getElementById('fCD').value||'',dateAdded:today()};
+  const data={name,phone,nationalId:document.getElementById('fCI').value.trim(),email:document.getElementById('fCE').value.trim(),address:document.getElementById('fCA').value.trim(),occupation:document.getElementById('fCO').value.trim(),dob:document.getElementById('fCD').value||'',dateAdded:today(),branchId:myBranchId()};
   addClient(data).then(()=>{
     addAudit('ADD_CLIENT','Client',data.id||'','Added '+name);
     CM('mAddClient');renderClients();updateStorageInfo();toast(`Client "${name}" added`,'success');
@@ -884,14 +1011,17 @@ function openClientDetail(id){
       <div class="detail-item"><label>Joined</label><div class="val">${fmtDate(c.dateAdded)}</div></div>
       <div class="detail-item"><label>Total Borrowed</label><div class="val" style="color:var(--gold2)">$${fmt(tb)}</div></div>
       <div class="detail-item"><label>Total Repaid</label><div class="val" style="color:var(--green)">$${fmt(tp)}</div></div>
-      <div class="detail-item"><label>Loans</label><div class="val">${cl.length} (${cl.filter(l=>l.status==='active').length} active)</div></div>
+      <div class="detail-item"><label>Loans</label><div class="val">${cl.length} (${cl.filter(l=>getLoanStatus(l)==='active').length} active)</div></div>
     </div>
     ${cl.length?`<div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--text3);font-weight:600;margin-bottom:10px">Loan History</div>
     <div style="display:flex;flex-direction:column;gap:8px">${cl.map(l=>{const bal=getLoanBalance(l.id),tot=getLoanTotal(l),pct=Math.min(100,Math.round((tot-bal)/tot*100));return`<div style="background:var(--surface);border-radius:var(--radius-sm);padding:12px;border:1px solid var(--border)"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="font-weight:500">$${fmt(l.amount)} — ${l.purpose||'General'}</span><span class="badge badge-${l.status}">${l.status}</span></div><div class="progress-bar" style="margin-bottom:4px"><div class="progress-fill ${pct<40?'red':pct<70?'amber':''}" style="width:${pct}%"></div></div><div style="font-size:11px;color:var(--text3)">${pct}% repaid · Bal: $${fmt(bal)} · ${l.interestRate}%/${l.term}mo</div></div>`;}).join('')}</div>`:
     `<div style="color:var(--text3);text-align:center;padding:20px">No loans for this client</div>`}`;
+  const branchTag=isSuperAdmin()&&client?.branchId?` <span style="font-size:10px;color:var(--text3)">(${branches.find(b=>b.id===client.branchId)?.name||''})</span>`:'';
+  document.getElementById('cdTitle').textContent=`Client — ${client?client.name:'?'}${branchTag}`;
   document.getElementById('cdFooter').innerHTML=`
     ${can('delete')?`<button class="btn btn-danger btn-sm" onclick="deleteClient('${id}')">Delete Client</button>`:''}
-    ${can('write')?`<button class="btn btn-ghost btn-sm" onclick="CM('mClientDetail');openEditClient('${id}')">✏️ Edit</button>`:''}
+    ${isSuperAdmin()?`<button class="btn btn-ghost btn-sm" onclick="openTransferClient('${id}')">&#x21C4; Transfer Branch</button>`:''}
+    ${can('write')?`<button class="btn btn-ghost btn-sm" onclick="CM('mClientDetail');openEditClient('${id}')">&#x270F;&#xFE0F; Edit</button>`:''}
     ${can('write')?`<button class="btn btn-primary" onclick="CM('mClientDetail');openAddLoan('${id}')">+ Add Loan</button>`:''}
     <button class="btn btn-ghost" onclick="CM('mClientDetail')">Close</button>`;
   OM('mClientDetail');
@@ -941,14 +1071,15 @@ async function saveEditClient(){
 // ================================================================
 function renderLoans(){
   const q=(document.getElementById('loanSearch')?.value||'').toLowerCase(),sf=document.getElementById('loanStatusFilter')?.value||'';
-  let data=loans.filter(l=>{const c=clients.find(c=>c.id===l.clientId);return(!q||((c?.name||'').toLowerCase().includes(q)||(l.purpose||'').toLowerCase().includes(q)))&&(!sf||l.status===sf);});
+  let data=loans.filter(l=>{const c=clients.find(c=>c.id===l.clientId);return(!q||((c?.name||'').toLowerCase().includes(q)||(l.purpose||'').toLowerCase().includes(q)))&&(!sf||getLoanStatus(l)===sf);});
   const cont=document.getElementById('loanCards');
   if(!data.length){cont.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="emoji">💰</div><p>No loans found</p></div>`;return;}
   cont.innerHTML=data.map(l=>{
     const c=clients.find(c=>c.id===l.clientId),tot=getLoanTotal(l),bal=getLoanBalance(l.id),paid=tot-bal,pct=Math.min(100,Math.round(paid/tot*100));
     const status=getLoanStatus(l);
+    const lb=branches.find(b=>b.id===l.branchId);
     return `<div class="loan-card" onclick="openLoanDetail('${l.id}')">
-      <div class="loan-card-header"><div><div class="loan-amount">$${fmt(l.amount)}</div><div class="loan-purpose">${l.purpose||'General Loan'}</div></div><span class="badge badge-${status}">${status}</span></div>
+      <div class="loan-card-header"><div><div class="loan-amount">$${fmt(l.amount)}</div><div class="loan-purpose">${l.purpose||'General Loan'}${lb&&isSuperAdmin()?` <span style="font-size:10px;color:var(--text3)">(${lb.name})</span>":""}</div></div><span class="badge badge-${status}">${status}</span></div>
       <div class="name-cell" style="margin-bottom:10px"><div class="avatar" style="background:${c?avatarColor(c.name):'#666'};width:24px;height:24px;font-size:10px">${c?initials(c.name):'?'}</div><span style="font-size:13px;font-weight:500">${c?c.name:'Unknown'}</span></div>
       <div class="loan-progress"><div class="loan-progress-label"><span>Repaid: $${fmt(paid)}</span><span>${pct}%</span></div><div class="progress-bar"><div class="progress-fill ${pct<30?'red':pct<70?'amber':''}" style="width:${pct}%"></div></div></div>
       <div class="loan-card-footer"><div style="font-size:11px;color:var(--text3)">📅 ${fmtDate(l.startDate)} · ${termLabel(l)} · ${l.interestRate}%</div><div style="font-size:12px;color:var(--text2)">Bal: <strong style="color:${bal>0?'var(--red)':'var(--green)'}">${bal>0?'$'+fmt(bal):'Paid ✓'}</strong></div></div>
@@ -990,7 +1121,7 @@ function saveLoan(){
   const cashToCustomer=amount-adminFees;
   if(cashToCustomer<0)return toast('Admin fees cannot exceed the loan amount.','error');
   if(!confirm('Confirm Disbursement\n\nLoan Amount:         $'+fmt(amount)+'\nAdmin Fee (retained): -$'+fmt(adminFees)+'\nCash to Customer:    $'+fmt(cashToCustomer)+'\n\nAll repayment calculations remain based on the full loan amount of $'+fmt(amount)+'.\n\nProceed?')) return;
-  addLoan({clientId,amount,interestRate:rate,term,termFrequency:freq,startDate:date,purpose:document.getElementById('fLP').value.trim(),notes:document.getElementById('fLN').value.trim(),adminFees,adminFeesPaid:true}).then(r=>{
+  addLoan({clientId,amount,interestRate:rate,term,termFrequency:freq,startDate:date,purpose:document.getElementById('fLP').value.trim(),notes:document.getElementById('fLN').value.trim(),adminFees,adminFeesPaid:true,branchId:myBranchId()}).then(r=>{
     // Admin fee always retained at disbursement — record immediately
     if(!USE_DB){
       const c=clients.find(c=>c.id===clientId);
@@ -1260,7 +1391,7 @@ function renderRepayments(){
   }).join('');
 }
 function openAddRepay(preselect){
-  const al=loans.filter(l=>l.status==='active'),sel=document.getElementById('fRL');
+  const al=loans.filter(l=>getLoanStatus(l)==='active'),sel=document.getElementById('fRL');
   sel.innerHTML='<option value="">-- Select Active Loan --</option>'+al.map(l=>{const c=clients.find(c=>c.id===l.clientId);const afW='';
   return`<option value="${l.id}">${c?c.name:'?'} - $${fmt(l.amount)}${afW}</option>`;}).join('');
   if(preselect)sel.value=preselect;
@@ -1381,7 +1512,7 @@ function saveExpense(){
   const amount=parseFloat(document.getElementById('fEA').value),category=document.getElementById('fEC').value,date=document.getElementById('fED').value;
   if(!amount||!category||!date)return toast('Amount, category and date are required','error');
   const dateErrE=validateDate(date,'Expense date'); if(dateErrE)return toast(dateErrE,'error');
-  addExpenseData({amount,category,description:document.getElementById('fEDesc').value.trim(),date}).then(r=>{
+  addExpenseData({amount,category,description:document.getElementById('fEDesc').value.trim(),date,branchId:myBranchId()}).then(r=>{
     addAudit('ADD_EXPENSE','Expense',r.id,`$${amount} — ${category}`);
     CM('mAddExpense');renderExpenses();updateStorageInfo();toast(`Expense of $${fmt(amount)} recorded`,'success');
   }).catch(e=>toast('Error: '+e.message,'error'));
@@ -1462,7 +1593,7 @@ function renderFinancials(){
 function renderReports(){
   if(!can('admin')){document.getElementById('repContent').innerHTML=permDenied('Reports are for Administrators only.');return;}
   const td=loans.reduce((s,l)=>s+l.amount,0),ti=loans.reduce((s,l)=>s+(l.amount*l.interestRate/100),0);
-  const tc=repayments.reduce((s,r)=>s+r.amount,0),al=loans.filter(l=>l.status==='active');
+  const tc=repayments.reduce((s,r)=>s+r.amount,0),al=loans.filter(l=>getLoanStatus(l)==='active');
   const to=al.reduce((s,l)=>s+getLoanBalance(l.id),0),par=td>0?(to/td*100).toFixed(1):0;
   document.getElementById('repContent').innerHTML=`
     <!-- Admin Fees Section -->
@@ -1508,7 +1639,7 @@ function renderReports(){
       <div class="card"><div class="card-header"><span class="card-title">Loan Size Distribution</span></div><div class="card-body"><div class="chart-container"><canvas id="cDist"></canvas></div></div></div>
     </div>`;
   setTimeout(()=>{
-    const st={active:0,completed:0,defaulted:0};loans.forEach(l=>st[l.status]++);
+    const st={active:0,completed:0,defaulted:0};loans.forEach(l=>{const s=getLoanStatus(l);st[s]=(st[s]||0)+1;});
     if(charts.st)charts.st.destroy();charts.st=new Chart(document.getElementById('cStatus'),{type:'pie',data:{labels:['Active','Completed','Defaulted'],datasets:[{data:[st.active,st.completed,st.defaulted],backgroundColor:['#27c97a','#4a8df5','#e85454'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#8a9bc0'}}}}});
     const ml=[],col=[],exp=[];for(let i=5;i>=0;i--){const d=new Date();d.setMonth(d.getMonth()-i);const ms=d.toISOString().slice(0,7);ml.push(d.toLocaleString('en',{month:'short'}));col.push(repayments.filter(r=>r.date.startsWith(ms)).reduce((s,r)=>s+r.amount,0));exp.push(loans.reduce((s,l)=>s+getLoanTotal(l)/l.term,0));}
     if(charts.co)charts.co.destroy();charts.co=new Chart(document.getElementById('cColl'),{type:'line',data:{labels:ml,datasets:[{label:'Collected',data:col,borderColor:'#27c97a',backgroundColor:'rgba(39,201,122,0.1)',tension:0.4,fill:true},{label:'Expected',data:exp,borderColor:'#4a8df5',backgroundColor:'transparent',tension:0.4,borderDash:[4,4]}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#8a9bc0'}}},scales:{y:{ticks:{color:'#8a9bc0'},grid:{color:'#243050'}},x:{ticks:{color:'#8a9bc0'},grid:{display:false}}}}});
@@ -1530,7 +1661,7 @@ async function renderUsers(){
   document.getElementById('usrContent').innerHTML=`
     <div class="card" style="margin-bottom:20px"><div class="table-wrap"><table>
       <thead><tr><th>User</th><th>Username</th><th>Role</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
-      <tbody>${userList.map(u=>`<tr>
+      <tbody>${userList.map(u=>{ const ub=branches.find(b=>b.id===u.branchId); return `<tr>
         <td class="primary"><div class="name-cell"><div class="avatar" style="background:${avatarColor(u.fullName)}">${initials(u.fullName)}</div>${u.fullName}</div></td>
         <td style="font-family:'DM Mono',monospace;font-size:12px">@${u.username}</td>
         <td>${roleBadge(u.role)}</td>
@@ -1557,6 +1688,7 @@ function openAddUser(){
   document.getElementById('fUR').value='loan_officer';document.getElementById('fUAct').value='1';
   document.getElementById('fUUN').disabled=false;
   document.getElementById('fUPL').textContent='Password *';document.getElementById('fUP2L').textContent='Confirm Password *';
+  populateBranchDropdown('mUBranch', null); toggleBranchField();
   OM('mUser');
 }
 function openEditUser(u){
