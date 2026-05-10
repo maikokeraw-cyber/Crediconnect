@@ -309,6 +309,9 @@ input::placeholder{color:var(--text3)}
     <div class="form-group full"><label>Address</label><textarea id="fCA" placeholder="Full address…"></textarea></div>
     <div class="form-group"><label>Date of Birth</label><input id="fCD" type="date"></div>
     <div class="form-group"><label>Occupation</label><input id="fCO" placeholder="e.g. Farmer, Trader"></div>
+    <div class="form-group" id="fClientBranchWrap" style="display:none"><label>Branch *</label>
+      <select id="fClientBranch"><option value="">— Select Branch —</option></select>
+    </div>
   </div></div>
   <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mAddClient')">Cancel</button><button class="btn btn-primary" onclick="saveClient()">Save Client</button></div>
 </div></div>
@@ -594,8 +597,13 @@ async function doLogin(){
 }
 
 function logout(expired){
-  authToken = null; currentUser = null;
+  authToken = null; currentUser = null; activeBranch = null;
   localStorage.removeItem('cc_token');
+  // Always hide branch selector on logout
+  const bsw = document.getElementById('branchSelectorWrap');
+  if(bsw) bsw.style.display='none';
+  const sbBranch = document.getElementById('sbBranch');
+  if(sbBranch) sbBranch.style.display='none';
   document.getElementById('appWrapper').classList.remove('visible');
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('lPass').value = '';
@@ -830,8 +838,9 @@ function navigate(page){
   const fns={dashboard:renderDashboard,clients:renderClients,loans:renderLoans,repayments:renderRepayments,expenses:renderExpenses,financials:renderFinancials,reports:renderReports,users:renderUsers,audit:renderAudit,backup:renderBackup,profile:renderProfile};
   // Loan officer cannot see dashboard — redirect to clients
   if(page==='dashboard'&&currentUser?.role==='loan_officer'){ navigate('clients'); return; }
-  // Always refresh from DB when visiting repayments or loans pages
-  if(USE_DB && (page==='repayments'||page==='loans'||page==='dashboard')){
+  // Refresh from DB on data pages so branch filter always applies
+  const refreshPages = ['dashboard','clients','loans','repayments','expenses','financials','reports'];
+  if(USE_DB && refreshPages.includes(page)){
     loadData().then(()=>{ if(fns[page]) fns[page](); });
   } else {
     if(fns[page]) fns[page]();
@@ -1052,19 +1061,33 @@ function renderClients(){
       <td>${c.phone}</td><td style="font-family:'DM Mono',monospace;font-size:12px">${c.nationalId||'—'}</td>
       <td>${al?`<span class="badge badge-active">${al} active</span>`:'<span style="color:var(--text3)">None</span>'}</td>
       <td style="font-family:'DM Mono',monospace">$${fmt(bor)}</td><td>${fmtDate(c.dateAdded)}</td>
-      <td onclick="event.stopPropagation()">${can('write')?`<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditClient('${c.id}')">✏️ Edit</button> <button class="btn btn-ghost btn-sm" onclick="openAddLoan('${c.id}')">+ Loan</button>`:''}</td>
+      <td onclick="event.stopPropagation()">${can('write')?`<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditClient('${c.id}')">✏️ Edit</button> <button class="btn btn-ghost btn-sm" onclick="openAddLoan('${c.id}')">+ Loan</button>`:''} ${can('delete')?`<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteClientDirect('${c.id}')">Delete</button>`:''}</td>
     </tr>`;
   }).join('');
 }
 
 function openAddClient(){
   ['fCN','fCP','fCI','fCE','fCA','fCD','fCO'].forEach(i=>{const el=document.getElementById(i);if(el)el.value='';});
+  // Super admin must choose a branch for new clients
+  const bWrap = document.getElementById('fClientBranchWrap');
+  const bSel  = document.getElementById('fClientBranch');
+  if(isSuperAdmin() && bWrap && bSel){
+    bSel.innerHTML = '<option value="">— Select Branch —</option>' +
+      branches.filter(b=>b.active!==false).map(b=>`<option value="${b.id}"${b.id===activeBranch?' selected':''}>${b.name}</option>`).join('');
+    bWrap.style.display = '';
+  } else if(bWrap){
+    bWrap.style.display = 'none';
+  }
   OM('mAddClient');
 }
 function saveClient(){
-  const name=document.getElementById('fCN').value.trim(),phone=document.getElementById('fCP').value.trim();
-  if(!name||!phone)return toast('Name and phone are required','error');
-  const data={name,phone,nationalId:document.getElementById('fCI').value.trim(),email:document.getElementById('fCE').value.trim(),address:document.getElementById('fCA').value.trim(),occupation:document.getElementById('fCO').value.trim(),dob:document.getElementById('fCD').value||'',dateAdded:today(),branchId:myBranchId()};
+  const name=document.getElementById('fCN').value.trim(), phone=document.getElementById('fCP').value.trim();
+  if(!name||!phone) return toast('Name and phone are required','error');
+  // Determine branch — super admin picks from dropdown, others use their own branch
+  const selectedBranch = document.getElementById('fClientBranch')?.value || null;
+  const branchId = isSuperAdmin() ? (selectedBranch || activeBranch || null) : myBranchId();
+  if(isSuperAdmin() && !branchId) return toast('Please select a branch for this client','error');
+  const data={name,phone,nationalId:document.getElementById('fCI').value.trim(),email:document.getElementById('fCE').value.trim(),address:document.getElementById('fCA').value.trim(),occupation:document.getElementById('fCO').value.trim(),dob:document.getElementById('fCD').value||'',dateAdded:today(),branchId};
   addClient(data).then(()=>{
     addAudit('ADD_CLIENT','Client',data.id||'','Added '+name);
     CM('mAddClient');renderClients();updateStorageInfo();toast(`Client "${name}" added`,'success');
@@ -1099,13 +1122,16 @@ function openClientDetail(id){
     <button class="btn btn-ghost" onclick="CM('mClientDetail')">Close</button>`;
   OM('mClientDetail');
 }
-function deleteClient(id){
-  if(!confirm('Delete this client and all their data?'))return;
+function deleteClientDirect(id){
+  const c=clients.find(c=>c.id===id);
+  if(!c) return;
+  if(!confirm(`Delete client "${c.name}" and all their data? This cannot be undone.`)) return;
   deleteClientData(id).then(()=>{
-    addAudit('DELETE_CLIENT','Client',id,'Deleted');
-    CM('mClientDetail');renderClients();updateStorageInfo();toast('Client deleted','success');
+    addAudit('DELETE_CLIENT','Client',id,'Deleted '+c.name);
+    renderClients();updateStorageInfo();toast('Client deleted','success');
   }).catch(e=>toast('Error: '+e.message,'error'));
 }
+function deleteClient(id){ deleteClientDirect(id); CM('mClientDetail'); }
 
 let _editClientId=null;
 function openEditClient(id){
