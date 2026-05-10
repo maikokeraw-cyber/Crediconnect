@@ -239,7 +239,7 @@ input::placeholder{color:var(--text3)}
       <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions</div></div>
       <div class="nav">
         <div class="nav-section">Overview</div>
-        <div class="nav-item active" id="nav-dashboard" onclick="navigate('dashboard')"><span class="icon">📊</span>Dashboard</div>
+        <div class="nav-item active" id="nav-dashboard" onclick="navigate('dashboard')" class="nav-item-admin-only"><span class="icon">📊</span>Dashboard</div>
         <div class="nav-section">Operations</div>
         <div class="nav-item" id="nav-clients" onclick="navigate('clients')"><span class="icon">👥</span>Clients</div>
         <div class="nav-item" id="nav-loans" onclick="navigate('loans')"><span class="icon">💰</span>Loan Portfolio</div>
@@ -428,8 +428,16 @@ input::placeholder{color:var(--text3)}
   <div class="modal-body"><div class="form-grid">
     <div class="form-group"><label>Full Name *</label><input id="fUFN" placeholder="Jane Doe"></div>
     <div class="form-group"><label>Username *</label><input id="fUUN" placeholder="janedoe"></div>
-    <div class="form-group full"><label>Role *</label>
-      <select id="fUR"><option value="viewer">Viewer — Read only</option><option value="loan_officer">Loan Officer — Add & record</option><option value="admin">Admin — Full access</option></select>
+    <div class="form-group"><label>Role *</label>
+      <select id="fUR" onchange="toggleBranchField()">
+        <option value="viewer">Viewer — Read only</option>
+        <option value="loan_officer">Loan Officer — Add & record</option>
+        <option value="admin">Admin — Full access</option>
+        <option value="super_admin">Super Admin — All branches</option>
+      </select>
+    </div>
+    <div class="form-group" id="mUBranchWrap"><label>Branch *</label>
+      <select id="mUBranch"><option value="">— Select Branch —</option></select>
     </div>
     <div class="form-group"><label id="fUPL">Password *</label><input id="fUP" type="password" placeholder="Min 6 characters"></div>
     <div class="form-group"><label id="fUP2L">Confirm Password *</label><input id="fUP2" type="password" placeholder="Repeat password"></div>
@@ -595,7 +603,9 @@ function enterApp(){
   document.getElementById('sbRole').textContent   = currentUser.role.replace(/_/g,' ');
   document.getElementById('sbAvatar').textContent = initials(currentUser.fullName);
   updateStorageInfo();
-  navigate('dashboard');
+  // Loan officer starts on clients, not dashboard
+  const startPage = currentUser?.role==='loan_officer' ? 'clients' : 'dashboard';
+  navigate(startPage);
 }
 
 // ================================================================
@@ -754,9 +764,11 @@ function updateStorageInfo(){
 //  NAVIGATION
 // ================================================================
 let charts={};
+let currentPage = 'dashboard';
 function navigate(page){
+  currentPage = page;
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  document.getElementById('page-'+page).classList.add('active');
+  document.getElementById('page-'+page)?.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   const ni=document.getElementById('nav-'+page); if(ni) ni.classList.add('active');
   const titles={dashboard:'Dashboard',clients:'Client Management',loans:'Loan Portfolio',repayments:'Repayment Tracking',expenses:'Expenses',financials:'Financial Overview',reports:'Reports & Analytics',users:'User Management',audit:'Audit Log',backup:'Backup & Export',profile:'My Profile'};
@@ -768,8 +780,10 @@ function navigate(page){
   if(page==='expenses'&&can('write'))   act.innerHTML=`<button class="btn btn-danger" onclick="openAddExpense()">＋ Record Expense</button>`;
   if(page==='users'&&can('admin'))      act.innerHTML=`<button class="btn btn-primary" onclick="openAddUser()">＋ Add User</button>`;
   const fns={dashboard:renderDashboard,clients:renderClients,loans:renderLoans,repayments:renderRepayments,expenses:renderExpenses,financials:renderFinancials,reports:renderReports,users:renderUsers,audit:renderAudit,backup:renderBackup,profile:renderProfile};
+  // Loan officer cannot see dashboard — redirect to clients
+  if(page==='dashboard'&&currentUser?.role==='loan_officer'){ navigate('clients'); return; }
   // Always refresh from DB when visiting repayments or loans pages
-  if(USE_DB && (page==='repayments'||page==='loans')){
+  if(USE_DB && (page==='repayments'||page==='loans'||page==='dashboard')){
     loadData().then(()=>{ if(fns[page]) fns[page](); });
   } else {
     if(fns[page]) fns[page]();
@@ -782,9 +796,17 @@ function navigate(page){
 // ================================================================
 function onBranchChange(){
   activeBranch = document.getElementById('branchSelector').value || null;
-  // Reload all data with new branch filter
-  if(USE_DB){ loadData().then(()=>{ navigate(currentPage||'dashboard'); }); }
-  else { navigate(currentPage||'dashboard'); }
+  const dest = currentPage||'dashboard';
+  if(USE_DB){
+    loadData().then(()=>{
+      navigate(dest);
+    }).catch(e=>{
+      console.error('Branch change error:',e);
+      toast('Could not load branch data: '+e.message,'error');
+    });
+  } else {
+    navigate(dest);
+  }
 }
 
 function showBranchSelector(){
@@ -1074,7 +1096,7 @@ async function saveEditClient(){
 // ================================================================
 function renderLoans(){
   const q=(document.getElementById('loanSearch')?.value||'').toLowerCase(),sf=document.getElementById('loanStatusFilter')?.value||'';
-  let data=loans.filter(l=>{const c=clients.find(c=>c.id===l.clientId);return(!q||((c?.name||'').toLowerCase().includes(q)||(l.purpose||'').toLowerCase().includes(q)))&&(!sf||getLoanStatus(l)===sf);});
+  let data=loans.filter(l=>{const c=clients.find(c=>c.id===l.clientId);return(!q||((c?.name||'').toLowerCase().includes(q)||(l.purpose||'').toLowerCase().includes(q)))&&(!sf||(getLoanStatus(l)===sf||l.status===sf));});
   const cont=document.getElementById('loanCards');
   if(!data.length){cont.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="emoji">💰</div><p>No loans found</p></div>`;return;}
   cont.innerHTML=data.map(l=>{
@@ -1671,7 +1693,7 @@ async function renderUsers(){
         <td style="font-size:12px;color:var(--text2)">${ub?ub.name:'—'}</td>
         <td>${u.active!==false?'<span style="color:var(--green);font-size:12px">● Active</span>':'<span style="color:var(--text3);font-size:12px">○ Inactive</span>'}</td>
         <td style="font-size:12px;color:var(--text2)">${fmtDT(u.lastLogin)||'Never'}</td>
-        <td><button class="btn btn-ghost btn-sm" onclick='openEditUser(${JSON.stringify({id:u.id,fullName:u.fullName,username:u.username,role:u.role,active:u.active,branchId:u.branchId||''})})'>Edit</button>
+        <td><button class="btn btn-ghost btn-sm" onclick="openEditUser('${u.id}')">Edit</button>
         ${u.id!==currentUser.id?`<button class="btn btn-danger btn-sm" style="margin-left:4px" onclick="deleteUser('${u.id}')">Delete</button>`:'<span style="font-size:11px;color:var(--text3);margin-left:8px">(you)</span>'}</td>
       </tr>`;}).join('')||'<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--text3)">No users</td></tr>'}</tbody>
     </table></div></div>
@@ -1687,52 +1709,77 @@ async function renderUsers(){
     </div></div>`;
 }
 function openAddUser(){
-  _editUserId=null;document.getElementById('mUserTitle').textContent='Add New User';
+  _editUserId=null;
+  document.getElementById('mUserTitle').textContent='Add New User';
   ['fUFN','fUUN','fUP','fUP2'].forEach(i=>{const el=document.getElementById(i);if(el)el.value='';});
-  document.getElementById('fUR').value='loan_officer';document.getElementById('fUAct').value='1';
+  document.getElementById('fUR').value='loan_officer';
+  document.getElementById('fUAct').value='1';
   document.getElementById('fUUN').disabled=false;
-  document.getElementById('fUPL').textContent='Password *';document.getElementById('fUP2L').textContent='Confirm Password *';
-  populateBranchDropdown('mUBranch', null); toggleBranchField();
+  document.getElementById('fUPL').textContent='Password *';
+  document.getElementById('fUP2L').textContent='Confirm Password *';
+  populateBranchDropdown('mUBranch', null);
+  toggleBranchField();
   OM('mUser');
 }
-function openEditUser(u){
-  _editUserId=u.id;document.getElementById('mUserTitle').textContent='Edit User';
-  document.getElementById('fUFN').value=u.fullName;document.getElementById('fUUN').value=u.username;
-  document.getElementById('fUUN').disabled=true;document.getElementById('fUR').value=u.role;
-  document.getElementById('fUAct').value=(u.active===false)?'0':'1';
-  document.getElementById('fUP').value='';document.getElementById('fUP2').value='';
-  document.getElementById('fUPL').textContent='New Password (leave blank to keep)';
-  document.getElementById('fUP2L').textContent='Confirm New Password';
+function openEditUser(id){
+  // Look up the user from the cached userList
+  const u = userList.find(u=>u.id===id);
+  if(!u){ toast('User not found','error'); return; }
+  _editUserId = u.id;
+  document.getElementById('mUserTitle').textContent = 'Edit User — '+u.fullName;
+  document.getElementById('fUFN').value  = u.fullName||'';
+  document.getElementById('fUUN').value  = u.username||'';
+  document.getElementById('fUUN').disabled = true;
+  document.getElementById('fUR').value   = u.role||'loan_officer';
+  document.getElementById('fUAct').value = (u.active===false)?'0':'1';
+  document.getElementById('fUP').value   = '';
+  document.getElementById('fUP2').value  = '';
+  document.getElementById('fUPL').textContent  = 'New Password (leave blank to keep)';
+  document.getElementById('fUP2L').textContent = 'Confirm New Password';
+  populateBranchDropdown('mUBranch', u.branchId||null);
+  toggleBranchField();
   OM('mUser');
 }
 async function saveUser(){
-  const fullName=document.getElementById('fUFN').value.trim(),username=document.getElementById('fUUN').value.trim().toLowerCase();
-  const role=document.getElementById('fUR').value,active=document.getElementById('fUAct').value==='1';
-  const pwd=document.getElementById('fUP').value,pwd2=document.getElementById('fUP2').value;
-  if(!fullName)return toast('Full name is required','error');
-  if(!_editUserId&&!username)return toast('Username is required','error');
-  if((!_editUserId||pwd)&&pwd!==pwd2)return toast('Passwords do not match','error');
-  if((!_editUserId||pwd)&&pwd&&pwd.length<6)return toast('Password must be at least 6 characters','error');
+  const fullName=document.getElementById('fUFN').value.trim();
+  const username=document.getElementById('fUUN').value.trim().toLowerCase();
+  const role=document.getElementById('fUR').value;
+  const active=document.getElementById('fUAct').value==='1';
+  const branchId=document.getElementById('mUBranch')?.value||null;
+  const pwd=document.getElementById('fUP').value;
+  const pwd2=document.getElementById('fUP2').value;
+  if(!fullName) return toast('Full name is required','error');
+  if(!_editUserId&&!username) return toast('Username is required','error');
+  if(role!=='super_admin'&&!branchId) return toast('Please select a branch for this user','error');
+  if((!_editUserId||pwd)&&pwd!==pwd2) return toast('Passwords do not match','error');
+  if((!_editUserId||pwd)&&pwd&&pwd.length<6) return toast('Password must be at least 6 characters','error');
   if(USE_DB){
     try{
-      if(_editUserId){ const body={fullName,role,active};if(pwd)body.password=pwd; await apiFetch('PUT',`/api/users/${_editUserId}`,body); }
-      else{ if(!pwd)return toast('Password is required','error'); await apiFetch('POST','/api/users',{username,fullName,role,password:pwd}); }
-      addAudit(_editUserId?'UPDATE_USER':'CREATE_USER','User',_editUserId||username,`${_editUserId?'Updated':'Created'} ${username}`);
-      CM('mUser');renderUsers();toast(_editUserId?'User updated':'User created','success');
-    }catch(e){toast('Error: '+e.message,'error');}
+      if(_editUserId){
+        const body={fullName,role,active,branchId:role==='super_admin'?null:branchId};
+        if(pwd) body.password=pwd;
+        await apiFetch('PUT',`/api/users/${_editUserId}`,body);
+      } else {
+        if(!pwd) return toast('Password is required','error');
+        await apiFetch('POST','/api/users',{username,fullName,role,password:pwd,branchId:role==='super_admin'?null:branchId});
+      }
+      addAudit(_editUserId?'UPDATE_USER':'CREATE_USER','User',_editUserId||username,`${_editUserId?'Updated':'Created'} ${fullName}`);
+      CM('mUser'); await loadData(); renderUsers();
+      toast(_editUserId?'User updated':'User created','success');
+    }catch(e){ toast('Error: '+e.message,'error'); }
   } else {
     if(_editUserId){
-      const u=users.find(u=>u.id===_editUserId);if(!u)return;
-      u.fullName=fullName;u.role=role;u.active=active;
-      if(pwd) hashPwd(pwd).then(h=>{u.passwordHash=h;lsSet(K.users,users);});
+      const u=users.find(u=>u.id===_editUserId); if(!u) return;
+      u.fullName=fullName; u.role=role; u.active=active; u.branchId=branchId;
+      if(pwd) hashPwd(pwd).then(h=>{u.passwordHash=h; lsSet(K.users,users);});
       else lsSet(K.users,users);
     } else {
-      if(!pwd)return toast('Password is required','error');
-      if(users.find(u=>u.username===username))return toast('Username already exists','error');
-      hashPwd(pwd).then(hash=>{users.push({id:uid(),username,fullName,role,passwordHash:hash,active,createdAt:today()});lsSet(K.users,users);});
+      if(!pwd) return toast('Password is required','error');
+      if(users.find(u=>u.username===username)) return toast('Username already exists','error');
+      hashPwd(pwd).then(hash=>{ users.push({id:uid(),username,fullName,role,branchId,passwordHash:hash,active,createdAt:today()}); lsSet(K.users,users); });
     }
     addAudit(_editUserId?'UPDATE_USER':'CREATE_USER','User',_editUserId||username,'');
-    CM('mUser');renderUsers();toast(_editUserId?'User updated':'User created','success');
+    CM('mUser'); renderUsers(); toast(_editUserId?'User updated':'User created','success');
   }
 }
 function deleteUser(id){
