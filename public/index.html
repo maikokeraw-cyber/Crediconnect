@@ -587,9 +587,13 @@ function logout(expired){
 function enterApp(){
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('appWrapper').classList.add('visible');
+  // Set branch context based on role
+  if(!isSuperAdmin()) activeBranch = currentUser.branchId || null;
   applySidebarRole();
-  document.getElementById('sbName').textContent  = currentUser.fullName;
-  document.getElementById('sbRole').textContent  = currentUser.role.replace('_',' ');
+  showBranchSelector();
+  if(isSuperAdmin()) document.querySelectorAll('.nav-super-admin').forEach(el=>el.style.display='');
+  document.getElementById('sbName').textContent   = currentUser.fullName;
+  document.getElementById('sbRole').textContent   = currentUser.role.replace(/_/g,' ');
   document.getElementById('sbAvatar').textContent = initials(currentUser.fullName);
   updateStorageInfo();
   navigate('dashboard');
@@ -1079,7 +1083,7 @@ function renderLoans(){
     const status=getLoanStatus(l);
     const lb=branches.find(b=>b.id===l.branchId);
     return `<div class="loan-card" onclick="openLoanDetail('${l.id}')">
-      <div class="loan-card-header"><div><div class="loan-amount">$${fmt(l.amount)}</div><div class="loan-purpose">${l.purpose||'General Loan'}${lb&&isSuperAdmin()?` <span style="font-size:10px;color:var(--text3)">(${lb.name})</span>":""}</div></div><span class="badge badge-${status}">${status}</span></div>
+      <div class="loan-card-header"><div><div class="loan-amount">$${fmt(l.amount)}</div><div class="loan-purpose">${l.purpose||'General Loan'}${lb&&isSuperAdmin()?` <span style="font-size:10px;color:var(--text3)">(${lb.name})</span>`:''}</div></div><span class="badge badge-${status}">${status}</span></div>
       <div class="name-cell" style="margin-bottom:10px"><div class="avatar" style="background:${c?avatarColor(c.name):'#666'};width:24px;height:24px;font-size:10px">${c?initials(c.name):'?'}</div><span style="font-size:13px;font-weight:500">${c?c.name:'Unknown'}</span></div>
       <div class="loan-progress"><div class="loan-progress-label"><span>Repaid: $${fmt(paid)}</span><span>${pct}%</span></div><div class="progress-bar"><div class="progress-fill ${pct<30?'red':pct<70?'amber':''}" style="width:${pct}%"></div></div></div>
       <div class="loan-card-footer"><div style="font-size:11px;color:var(--text3)">📅 ${fmtDate(l.startDate)} · ${termLabel(l)} · ${l.interestRate}%</div><div style="font-size:12px;color:var(--text2)">Bal: <strong style="color:${bal>0?'var(--red)':'var(--green)'}">${bal>0?'$'+fmt(bal):'Paid ✓'}</strong></div></div>
@@ -1660,16 +1664,17 @@ async function renderUsers(){
   }
   document.getElementById('usrContent').innerHTML=`
     <div class="card" style="margin-bottom:20px"><div class="table-wrap"><table>
-      <thead><tr><th>User</th><th>Username</th><th>Role</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
+      <thead><tr><th>User</th><th>Username</th><th>Role</th><th>Branch</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
       <tbody>${userList.map(u=>{ const ub=branches.find(b=>b.id===u.branchId); return `<tr>
         <td class="primary"><div class="name-cell"><div class="avatar" style="background:${avatarColor(u.fullName)}">${initials(u.fullName)}</div>${u.fullName}</div></td>
         <td style="font-family:'DM Mono',monospace;font-size:12px">@${u.username}</td>
         <td>${roleBadge(u.role)}</td>
+        <td style="font-size:12px;color:var(--text2)">${ub?ub.name:'—'}</td>
         <td>${u.active!==false?'<span style="color:var(--green);font-size:12px">● Active</span>':'<span style="color:var(--text3);font-size:12px">○ Inactive</span>'}</td>
         <td style="font-size:12px;color:var(--text2)">${fmtDT(u.lastLogin)||'Never'}</td>
-        <td><button class="btn btn-ghost btn-sm" onclick='openEditUser(${JSON.stringify({id:u.id,fullName:u.fullName,username:u.username,role:u.role,active:u.active})})'>Edit</button>
+        <td><button class="btn btn-ghost btn-sm" onclick='openEditUser(${JSON.stringify({id:u.id,fullName:u.fullName,username:u.username,role:u.role,active:u.active,branchId:u.branchId||''})})'>Edit</button>
         ${u.id!==currentUser.id?`<button class="btn btn-danger btn-sm" style="margin-left:4px" onclick="deleteUser('${u.id}')">Delete</button>`:'<span style="font-size:11px;color:var(--text3);margin-left:8px">(you)</span>'}</td>
-      </tr>`).join('')||'<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--text3)">No users</td></tr>'}</tbody>
+      </tr>`;}).join('')||'<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--text3)">No users</td></tr>'}</tbody>
     </table></div></div>
     <div class="card"><div class="card-body">
       <div style="font-size:13px;font-weight:600;margin-bottom:12px">Role Permissions</div>
