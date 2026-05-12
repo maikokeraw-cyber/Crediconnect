@@ -468,15 +468,33 @@ app.post('/api/repayments', requireAuth, requireDB, requireRole('admin','loan_of
       `INSERT INTO repayments (id,loan_id,amount,date,notes,added_by) VALUES ($1,$2,$3,$4,$5,$6)`,
       [id, loanId, amount, date, notes||null, req.user.id]
     );
-    // Always recalculate true status from total paid — never rely on stored status
+    // Recalculate status — defaulted loans revert to active when caught up
     const loanRes = await pool.query('SELECT * FROM loans WHERE id=$1', [loanId]);
     const loan    = loanRes.rows[0];
     if (loan) {
-      const totalOwed = Number(loan.amount) + Number(loan.amount) * Number(loan.interest_rate) / 100;
-      const paidRes   = await pool.query('SELECT COALESCE(SUM(amount),0) AS paid FROM repayments WHERE loan_id=$1', [loanId]);
-      const paid      = Number(paidRes.rows[0].paid);
-      const newStatus = loan.status === 'defaulted' ? 'defaulted' : (paid >= totalOwed - 0.005 ? 'completed' : 'active');
-      if (newStatus !== loan.status) {
+      const totalOwed   = Number(loan.amount) + Number(loan.amount) * Number(loan.interest_rate) / 100;
+      const paidRes     = await pool.query('SELECT COALESCE(SUM(amount),0) AS paid FROM repayments WHERE loan_id=$1', [loanId]);
+      const totalPaid   = Number(paidRes.rows[0].paid);
+      // Check if overdue based on amortisation schedule
+      const startDate   = new Date(loan.start_date);
+      const freq        = loan.term_frequency || 'monthly';
+      const term        = Number(loan.term);
+      const periodicPay = totalOwed / term;
+      let duePeriods    = 0;
+      const todayDate   = new Date();
+      for(let i=1; i<=term; i++){
+        const due = new Date(startDate);
+        if(freq==='monthly')     due.setMonth(due.getMonth()+i);
+        else if(freq==='weekly') due.setDate(due.getDate()+(i*7));
+        else                     due.setDate(due.getDate()+i);
+        if(due <= todayDate) duePeriods++;
+      }
+      const isOverdue = duePeriods > 0 && totalPaid < (duePeriods * periodicPay) - 0.005;
+      let newStatus;
+      if(totalPaid >= totalOwed - 0.005) newStatus = 'completed';
+      else if(isOverdue)                  newStatus = 'defaulted';
+      else                                newStatus = 'active';
+      if(newStatus !== loan.status){
         await pool.query('UPDATE loans SET status=$1,updated_at=NOW() WHERE id=$2', [newStatus, loanId]);
       }
     }

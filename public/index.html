@@ -791,21 +791,19 @@ function getLoanPaid(id){ return repayments.filter(r=>r.loanId===id).reduce((s,r
 function getLoanBalance(id){ const l=loans.find(l=>l.id===id);if(!l)return 0;return Math.max(0,getLoanTotal(l)-getLoanPaid(id)); }
 // Use balance to determine true status — fixes completed loans showing incorrectly
 function isLoanOverdue(loan){
-  // A loan is overdue if any scheduled payment date has passed
-  // and the total paid is less than what should have been paid by now
   const amort = buildAmortisation(loan);
   const todayStr = today();
   const duePeriods = amort.filter(r=>r.dueDate<=todayStr).length;
-  if(duePeriods===0) return false; // no payments due yet
+  if(duePeriods===0) return false;
   const amountDue = duePeriods * (getLoanTotal(loan)/loan.term);
   const totalPaid = getLoanPaid(loan.id);
   return totalPaid < amountDue - 0.005;
 }
 function getLoanStatus(loan){
   const bal=getLoanBalance(loan.id);
-  if(loan.status==='defaulted') return 'defaulted';
+  // Always recalculate from actual payments — never lock to stored status
+  // This allows caught-up defaulted loans to revert to active automatically
   if(bal<=0.005) return 'completed';
-  if(loan.status!=='active') return loan.status||'active';
   if(isLoanOverdue(loan)) return 'defaulted';
   return 'active';
 }
