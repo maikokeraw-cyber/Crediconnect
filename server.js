@@ -1,16 +1,16 @@
 // ================================================================
-//  CrediConnect v3.0 — Express + PostgreSQL Server
-//  Deployable on Render.com (free tier)
+//  Credinova v4.1 — Express + PostgreSQL Server
 // ================================================================
 
 require('dotenv').config();
-const express = require('express');
-const { Pool } = require('pg');
-const bcrypt  = require('bcryptjs');
-const jwt     = require('jsonwebtoken');
-const cors    = require('cors');
-const path    = require('path');
+const express   = require('express');
+const { Pool }  = require('pg');
+const bcrypt    = require('bcryptjs');
+const jwt       = require('jsonwebtoken');
+const cors      = require('cors');
+const path      = require('path');
 const { v4: uuidv4 } = require('uuid');
+const rateLimit = require('express-rate-limit');
 
 const app         = express();
 const PORT        = process.env.PORT || 3000;
@@ -18,6 +18,26 @@ const JWT_SECRET  = process.env.JWT_SECRET  || 'crediconnect-dev-secret-change-i
 const JWT_EXPIRES = process.env.JWT_EXPIRES_IN || '8h';
 
 app.use(cors());
+
+// ── Rate Limiters ────────────────────────────────────────────────
+// Login: max 5 attempts per IP per 15 minutes
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,   // 15 minutes
+  max: 5,
+  message: { error: 'Too many login attempts. Please wait 15 minutes and try again.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true, // only count failed attempts
+});
+
+// General API: max 200 requests per IP per minute (prevents scraping)
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,         // 1 minute
+  max: 200,
+  message: { error: 'Too many requests. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 app.use(express.json({ limit: '10mb' }));
 // Serve static files — no cache on HTML so updates always load fresh
 app.use(express.static(path.join(__dirname, 'public'), {
@@ -29,6 +49,9 @@ app.use(express.static(path.join(__dirname, 'public'), {
     }
   }
 }));
+
+// Apply general rate limit to all API routes
+app.use('/api', apiLimiter);
 
 // ── PostgreSQL Pool ──────────────────────────────────────────────
 const pool = new Pool({
@@ -197,7 +220,7 @@ app.get('/api/status', (req, res) => {
 // ================================================================
 //  AUTH
 // ================================================================
-app.post('/api/auth/login', requireDB, async (req, res) => {
+app.post('/api/auth/login', loginLimiter, requireDB, async (req, res) => {
   try {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
