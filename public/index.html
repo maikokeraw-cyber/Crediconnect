@@ -1496,7 +1496,7 @@ function renderRepayments(){
   document.getElementById('repaySummary').innerHTML=`<div class="sum-item"><div class="sum-label">Repayments</div><div class="sum-val" style="color:var(--green)">$${fmt(tp)}</div></div><div class="sum-item"><div class="sum-label">Admin Fees Retained</div><div class="sum-val" style="color:var(--gold2)">$${fmt(afPaidTotal)}</div></div><div class="sum-item"><div class="sum-label">Transactions</div><div class="sum-val">${data.length+afPaid.length}</div></div><div class="sum-item"><div class="sum-label">Last Payment</div><div class="sum-val" style="font-size:14px">${data[0]?fmtDate(data[0].date):'--'}</div></div>`;
   const tb=document.getElementById('repayTbody');
   const pendingRows=[]; // Admin fees are always retained at disbursement — no pending rows
-  const afPaidRows=afPaid.sort((a,b)=>b.date.localeCompare(a.date)).map(a=>{const lo=loans.find(l=>l.id===a.loanId),c=lo?clients.find(c=>c.id===lo.clientId):null;const av=c?`<div class="name-cell"><div class="avatar" style="background:${avatarColor(c.name)};width:24px;height:24px;font-size:10px">${initials(c.name)}</div>${c.name}</div>`:'--';return `<tr style="background:rgba(201,149,42,0.05)"><td class="primary">${fmtDate(a.date)}</td><td>${av}</td><td style="font-family:'DM Mono',monospace;font-size:11px">...${a.loanId.slice(-6)}</td><td style="color:var(--gold2);font-weight:600">+$${fmt(a.amount)}</td><td><span style="background:var(--gold-dim);color:var(--gold2);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Admin Fee</span></td><td style="color:var(--text2);font-size:12px">${a.notes||'--'}</td><td onclick="event.stopPropagation()">${can('delete')?`<button class="btn btn-danger btn-sm" onclick="handleDeleteAdminFee('${a.id}')">Delete</button>`:''}</td></tr>`;});
+  const afPaidRows=afPaid.sort((a,b)=>b.date.localeCompare(a.date)).map(a=>{const lo=loans.find(l=>l.id===a.loanId),c=lo?clients.find(c=>c.id===lo.clientId):null;const av=c?`<div class="name-cell"><div class="avatar" style="background:${avatarColor(c.name)};width:24px;height:24px;font-size:10px">${initials(c.name)}</div>${c.name}</div>`:'--';const isFine=(a.notes||'').toLowerCase().includes('fine');const typeLabel=isFine?`<span style="background:rgba(249,115,22,0.15);color:#f97316;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">FINE</span>`:`<span style="background:var(--gold-dim);color:var(--gold2);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Admin Fee</span>`;const amtColor=isFine?'#f97316':'var(--gold2)';return `<tr style="background:rgba(201,149,42,0.05)"><td class="primary">${fmtDate(a.date)}</td><td>${av}</td><td style="font-family:'DM Mono',monospace;font-size:11px">...${a.loanId.slice(-6)}</td><td style="color:${amtColor};font-weight:600">+$${fmt(a.amount)}</td><td>${typeLabel}</td><td style="color:var(--text2);font-size:12px">${a.notes||'--'}</td><td onclick="event.stopPropagation()">${can('delete')?`<button class="btn btn-danger btn-sm" onclick="handleDeleteAdminFee('${a.id}')">Delete</button>`:''}</td></tr>`;});
   if(!data.length&&!pendingRows.length&&!afPaidRows.length){tb.innerHTML=`<tr><td colspan="7"><div class="empty-state"><div class="emoji">&#x1F4B3;</div><p>No payments found</p></div></td></tr>`;return;}
   tb.innerHTML=pendingRows.join('')+afPaidRows.join('')+data.map(r=>{
     const lo=loans.find(l=>l.id===r.loanId),c=lo?clients.find(c=>c.id===lo.clientId):null;
@@ -1773,8 +1773,28 @@ function renderReports(){
       </div>
       <div style="margin-top:14px;max-height:180px;overflow-y:auto">
         <table style="width:100%;font-size:12.5px;border-collapse:collapse">
-          <thead><tr><th style="text-align:left;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px">Date</th><th style="text-align:left;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px">Client</th><th style="text-align:right;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px">Amount</th></tr></thead>
-          <tbody>${adminFeePayments.sort((a,b)=>b.date.localeCompare(a.date)).map(a=>{const lo=loans.find(l=>l.id===a.loanId),c=lo?clients.find(c=>c.id===lo.clientId):null;return`<tr style="border-bottom:1px solid var(--border)"><td style="padding:7px 10px;color:var(--text2)">${fmtDate(a.date)}</td><td style="padding:7px 10px">${c?c.name:'--'}</td><td style="padding:7px 10px;text-align:right;color:var(--gold2);font-family:'DM Mono',monospace">+$${fmt(a.amount)}</td></tr>`;}).join('')||'<tr><td colspan="3" style="padding:14px;text-align:center;color:var(--text3)">No admin fees collected yet</td></tr>'}</tbody>
+          <thead><tr>
+            <th style="text-align:left;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px">Date</th>
+            <th style="text-align:left;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px">Client</th>
+            <th style="text-align:left;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px">Type</th>
+            <th style="text-align:left;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px">Notes</th>
+            <th style="text-align:right;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px">Amount</th>
+          </tr></thead>
+          <tbody>${adminFeePayments.sort((a,b)=>b.date.localeCompare(a.date)).map(a=>{
+            const lo=loans.find(l=>l.id===a.loanId),c=lo?clients.find(c=>c.id===lo.clientId):null;
+            const isFine=(a.notes||'').toLowerCase().includes('fine');
+            const typeLabel=isFine
+              ? `<span style="background:rgba(249,115,22,0.15);color:#f97316;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700">FINE</span>`
+              : `<span style="background:var(--gold-dim);color:var(--gold2);padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700">ADMIN FEE</span>`;
+            const amtColor=isFine?'#f97316':'var(--gold2)';
+            return`<tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:7px 10px;color:var(--text2)">${fmtDate(a.date)}</td>
+              <td style="padding:7px 10px">${c?c.name:'--'}</td>
+              <td style="padding:7px 10px">${typeLabel}</td>
+              <td style="padding:7px 10px;color:var(--text3);font-size:11px">${a.notes||'--'}</td>
+              <td style="padding:7px 10px;text-align:right;color:${amtColor};font-family:'DM Mono',monospace;font-weight:600">+$${fmt(a.amount)}</td>
+            </tr>`;
+          }).join('')||'<tr><td colspan="5" style="padding:14px;text-align:center;color:var(--text3)">No entries yet</td></tr>'}</tbody>
         </table>
       </div>
     </div>
