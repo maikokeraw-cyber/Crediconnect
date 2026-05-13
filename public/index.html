@@ -371,7 +371,7 @@ input::placeholder{color:var(--text3)}
     <div class="form-group"><label>Amount Paid *</label><input id="fRA" type="number" placeholder="500"></div>
     <div class="form-group"><label>Payment Date *</label><input id="fRD" type="date"></div>
     <div class="form-group" id="fRFineWrap" style="display:none">
-      <label>Fine / Penalty <span style="font-size:10px;color:var(--amber)">(defaulted loan)</span></label>
+      <label>Fine / Penalty <span style="font-size:10px;color:var(--gold2)">(recorded as income)</span></label>
       <input id="fRFine" type="number" placeholder="0.00" step="0.01" min="0">
     </div>
     <div class="form-group full"><label>Notes</label><input id="fRN" placeholder="Cash, Transfer…"></div>
@@ -395,7 +395,7 @@ input::placeholder{color:var(--text3)}
         <option value="">— Select Category —</option>
         <option>Salaries & Wages</option><option>Office Rent</option><option>Utilities</option>
         <option>Transport & Travel</option><option>Marketing & Advertising</option>
-        <option>Office Supplies</option><option>Bank Charges</option><option>Penalty Income</option><option>Loan Write-offs</option>
+        <option>Office Supplies</option><option>Bank Charges</option><option>Loan Write-offs</option>
         <option>IT & Software</option><option>Training & Development</option>
         <option>Maintenance & Repairs</option><option>Other</option>
       </select>
@@ -583,7 +583,10 @@ async function doLogin(){
       await loadData();
       enterApp();
     } catch (e) {
-      errEl.textContent = e.message; errEl.style.display = 'block';
+      const msg = e.message.toLowerCase().includes('too many')
+        ? '🔒 Too many failed attempts. Please wait 15 minutes and try again.'
+        : e.message;
+      errEl.textContent = msg; errEl.style.display = 'block';
     }
   } else {
     // Offline fallback — check localStorage users
@@ -1585,15 +1588,14 @@ async function saveRepay(){
   addRepayment({loanId,amount,date,notes}).then(async r=>{
     if(!repayments.find(rp=>rp.id===r.id)){repayments.push(r);const l2=loans.find(l=>l.id===loanId);if(l2&&getLoanBalance(loanId)<=0)l2.status='completed';saveAll();}
     addAudit('RECORD_REPAYMENT','Repayment',r.id,'$'+amount);
-    // Record fine as income if applicable
+    // Record fine as income via admin_fee_payments (not expenses)
     if(fine>0 && isDefaulted){
       const c=clients.find(c=>c.id===loan.clientId);
-      await addExpenseData({
+      await addAdminFeePayment({
+        loanId,
         amount:fine,
-        category:'Penalty Income',
-        description:'Fine on defaulted loan — '+(c?c.name:'client')+' ($'+fmt(loan.amount)+')',
         date,
-        branchId:myBranchId()
+        notes:'Fine — defaulted loan'+(c?' ('+c.name+')':'')
       }).catch(()=>{});
       addAudit('RECORD_FINE','Fine',loanId,'$'+fine+' fine on defaulted loan');
       CM('mAddRepay');renderRepayments();updateStorageInfo();
