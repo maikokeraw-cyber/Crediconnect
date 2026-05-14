@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Credinova v4.1 — Financial Solutions</title>
+<title>Credinova v4.2 — Financial Solutions</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
@@ -236,13 +236,14 @@ input::placeholder{color:var(--text3)}
   </div>
   <div id="appLayout">
     <nav id="sidebar">
-      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v4.1</div></div>
+      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v4.2</div></div>
       <div class="nav">
         <div class="nav-section">Overview</div>
         <div class="nav-item active" id="nav-dashboard" onclick="navigate('dashboard')" class="nav-item-admin-only"><span class="icon">📊</span>Dashboard</div>
         <div class="nav-section">Operations</div>
         <div class="nav-item" id="nav-clients" onclick="navigate('clients')"><span class="icon">👥</span>Clients</div>
         <div class="nav-item" id="nav-loans" onclick="navigate('loans')"><span class="icon">💰</span>Loan Portfolio</div>
+        <div class="nav-item" id="nav-duePayments" onclick="navigate('duePayments')" style="position:relative"><span class="icon">📅</span>Due Payments<span id="dueBadge" style="display:none;position:absolute;top:6px;right:10px;background:var(--red);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;text-align:center;line-height:18px;padding:0 4px">0</span></div>
         <div class="nav-item" id="nav-repayments" onclick="navigate('repayments')"><span class="icon">💳</span>Repayments</div>
         <div class="nav-section nav-write">Expenses</div>
         <div class="nav-item nav-write" id="nav-expenses" onclick="navigate('expenses')"><span class="icon">🧾</span>Expenses</div>
@@ -287,6 +288,7 @@ input::placeholder{color:var(--text3)}
           <div class="summary-row" id="repaySummary"></div>
           <div class="card"><div class="table-wrap"><table><thead><tr><th>Date</th><th>Client</th><th>Loan Ref</th><th>Paid</th><th>Balance After</th><th>Notes</th><th></th></tr></thead><tbody id="repayTbody"></tbody></table></div></div>
         </div>
+        <div id="page-duePayments" class="page"><div id="duePaymentsContent"></div></div>
         <div id="page-expenses" class="page"><div id="expContent"></div></div>
         <div id="page-financials" class="page"><div id="finContent"></div></div>
         <div id="page-reports" class="page"><div id="repContent"></div></div>
@@ -543,6 +545,7 @@ async function loadData() {
     saveAll();
     updateStorageInfo();
     showBranchSelector();
+    updateDueBadge(); // refresh badge count after every data load
     // Update branch name in sidebar now that branches are loaded
     if(!isSuperAdmin() && currentUser?.branchId){
       const b = branches.find(b=>b.id===currentUser.branchId);
@@ -778,6 +781,15 @@ async function deleteAdminFeePayment(id) {
 // ================================================================
 function uid(){ return Math.random().toString(36).slice(2,10)+Date.now().toString(36); }
 function today(){ return new Date().toISOString().slice(0,10); }
+// Zimbabwe = UTC+2, no daylight saving — use for all due date calculations
+function todayZW(){
+  const zw = new Date(Date.now() + 2*60*60*1000);
+  return zw.toISOString().slice(0,10);
+}
+function tomorrowZW(){
+  const zw = new Date(Date.now() + 2*60*60*1000 + 24*60*60*1000);
+  return zw.toISOString().slice(0,10);
+}
 function validateDate(date, label){
   if(!date) return `${label} is required`;
   if(date > today()) return `${label} cannot be a future date. Please enter today or an earlier date.`;
@@ -795,8 +807,10 @@ function getLoanBalance(id){ const l=loans.find(l=>l.id===id);if(!l)return 0;ret
 // Use balance to determine true status — fixes completed loans showing incorrectly
 function isLoanOverdue(loan){
   const amort = buildAmortisation(loan);
-  const todayStr = today();
-  const duePeriods = amort.filter(r=>r.dueDate<=todayStr).length;
+  const todayStr = todayZW(); // Zimbabwe time
+  // Only count periods STRICTLY before today — client can still pay today
+  // This means overdue only triggers after midnight Zimbabwe time
+  const duePeriods = amort.filter(r=>r.dueDate < todayStr).length;
   if(duePeriods===0) return false;
   const amountDue = duePeriods * (getLoanTotal(loan)/loan.term);
   const totalPaid = getLoanPaid(loan.id);
@@ -834,7 +848,7 @@ function updateStorageInfo(){
     ? `<span style="color:var(--green)">● Supabase PostgreSQL</span>`
     : `<span style="color:var(--amber)">● localStorage (offline)</span>`;
   const bLabel=isSuperAdmin()?(activeBranch?`Branch:${branches.find(b=>b.id===activeBranch)?.name||activeBranch.slice(-4)}`:'All'):(currentUser?.branchId?`Branch:${branches.find(b=>b.id===currentUser.branchId)?.name||'ID:'+currentUser.branchId.slice(-4)}`:'⚠️ No Branch');
-document.getElementById('storageInfo').innerHTML=`v4.1 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
+document.getElementById('storageInfo').innerHTML=`v4.2 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
 }
 
 // ================================================================
@@ -848,7 +862,7 @@ function navigate(page){
   document.getElementById('page-'+page)?.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   const ni=document.getElementById('nav-'+page); if(ni) ni.classList.add('active');
-  const titles={dashboard:'Dashboard',clients:'Client Management',loans:'Loan Portfolio',repayments:'Repayment Tracking',expenses:'Expenses',financials:'Financial Overview',reports:'Reports & Analytics',users:'User Management',audit:'Audit Log',backup:'Backup & Export',profile:'My Profile'};
+  const titles={dashboard:'Dashboard',clients:'Client Management',loans:'Loan Portfolio',duePayments:'Due Payments',repayments:'Repayment Tracking',expenses:'Expenses',financials:'Financial Overview',reports:'Reports & Analytics',users:'User Management',audit:'Audit Log',backup:'Backup & Export',profile:'My Profile'};
   document.getElementById('pageTitle').textContent=titles[page]||page;
   const act=document.getElementById('topbarActions'); act.innerHTML='';
   if(page==='clients'&&can('write'))    act.innerHTML=`<button class="btn btn-primary" onclick="openAddClient()">＋ Add Client</button>`;
@@ -856,11 +870,11 @@ function navigate(page){
   if(page==='repayments'&&can('write')) act.innerHTML=`<button class="btn btn-primary" onclick="openAddRepay()">＋ Record Payment</button>`;
   if(page==='expenses'&&can('write'))   act.innerHTML=`<button class="btn btn-danger" onclick="openAddExpense()">＋ Record Expense</button>`;
   if(page==='users'&&can('admin'))      act.innerHTML=`<button class="btn btn-primary" onclick="openAddUser()">＋ Add User</button>`;
-  const fns={dashboard:renderDashboard,clients:renderClients,loans:renderLoans,repayments:renderRepayments,expenses:renderExpenses,financials:renderFinancials,reports:renderReports,users:renderUsers,audit:renderAudit,backup:renderBackup,profile:renderProfile};
+  const fns={dashboard:renderDashboard,clients:renderClients,loans:renderLoans,repayments:renderRepayments,duePayments:renderDuePayments,expenses:renderExpenses,financials:renderFinancials,reports:renderReports,users:renderUsers,audit:renderAudit,backup:renderBackup,profile:renderProfile};
   // Loan officer cannot see dashboard — redirect to clients
   if(page==='dashboard'&&currentUser?.role==='loan_officer'){ navigate('clients'); return; }
   // Refresh from DB on data pages so branch filter always applies
-  const refreshPages = ['dashboard','clients','loans','repayments','expenses','financials','reports'];
+  const refreshPages = ['dashboard','clients','loans','duePayments','repayments','expenses','financials','reports'];
   if(USE_DB && refreshPages.includes(page)){
     loadData().then(()=>{ if(fns[page]) fns[page](); });
   } else {
@@ -966,7 +980,136 @@ function openTransferClient(clientId){
 }
 
 // ================================================================
-//  DASHBOARD
+//  DUE PAYMENTS PAGE
+// ================================================================
+function updateDueBadge(){
+  const tzd=todayZW(), tzTomorrow=tomorrowZW();
+  const active=loans.filter(l=>getLoanStatus(l)==='active'||getLoanStatus(l)==='defaulted');
+  const dueToday=active.filter(l=>{
+    const amort=buildAmortisation(l);
+    return amort.some(r=>r.dueDate===tzd);
+  });
+  const overdue=active.filter(l=>isLoanOverdue(l));
+  const total=new Set([...dueToday.map(l=>l.id),...overdue.map(l=>l.id)]).size;
+  const badge=document.getElementById('dueBadge');
+  if(badge){
+    if(total>0){ badge.textContent=total; badge.style.display='block'; }
+    else badge.style.display='none';
+  }
+}
+
+function renderDuePayments(){
+  const pg=document.getElementById('duePaymentsContent');
+  const tzd=todayZW(), tzTomorrow=tomorrowZW();
+  const freq=document.getElementById('dueFreqFilter')?.value||'';
+
+  // Build due lists — filtered by frequency if selected
+  const dueToday=[],dueTomorrow=[],overdueList=[];
+  loans.forEach(l=>{
+    const status=getLoanStatus(l);
+    if(status==='completed') return;
+    if(freq && l.termFrequency!==freq) return; // frequency filter
+    const c=clients.find(c=>c.id===l.clientId);
+    const amort=buildAmortisation(l);
+    const bal=getLoanBalance(l.id);
+    const freqBadge=`<span style="font-size:9px;padding:1px 5px;border-radius:6px;font-weight:700;text-transform:uppercase;background:${l.termFrequency==='daily'?'rgba(74,141,245,0.15)':l.termFrequency==='weekly'?'rgba(39,201,122,0.15)':'rgba(240,168,50,0.15)'};color:${l.termFrequency==='daily'?'var(--blue)':l.termFrequency==='weekly'?'var(--green)':'var(--amber)'}">${l.termFrequency||'monthly'}</span>`;
+    // Today
+    const todayRow=amort.find(r=>r.dueDate===tzd);
+    if(todayRow) dueToday.push({loan:l,client:c,row:todayRow,bal,status,freqBadge});
+    // Tomorrow
+    const tmrRow=amort.find(r=>r.dueDate===tzTomorrow);
+    if(tmrRow) dueTomorrow.push({loan:l,client:c,row:tmrRow,bal,status,freqBadge});
+    // Overdue
+    if(isLoanOverdue(l)){
+      const lastDue=amort.filter(r=>r.dueDate<tzd).pop();
+      if(lastDue){
+        const daysOverdue=Math.floor((new Date(tzd)-new Date(lastDue.dueDate))/(86400000));
+        overdueList.push({loan:l,client:c,row:lastDue,bal,status,daysOverdue,freqBadge});
+      }
+    }
+  });
+  overdueList.sort((a,b)=>b.daysOverdue-a.daysOverdue);
+
+  const renderTable=(items,emptyMsg,showDays)=>{
+    if(!items.length) return `<div style="padding:20px;text-align:center;color:var(--text3)">${emptyMsg}</div>`;
+    return `<div class="table-wrap"><table>
+      <thead><tr>
+        <th>Client</th>
+        <th>Phone</th>
+        <th>Freq</th>
+        <th>Payment Due</th>
+        <th>Balance</th>
+        <th>Due Date</th>
+        ${showDays?'<th>Days Overdue</th>':''}
+        <th></th>
+      </tr></thead>
+      <tbody>${items.map(({loan:l,client:c,row,bal,daysOverdue,freqBadge})=>{
+        const av=c?`<div class="name-cell"><div class="avatar" style="background:${avatarColor(c.name)};width:26px;height:26px;font-size:10px">${initials(c.name)}</div><span style="font-weight:500">${c.name}</span></div>`:'—';
+        const phone=c?.phone?`<a href="tel:${c.phone}" style="color:var(--text);font-family:'DM Mono',monospace;font-size:12px;text-decoration:none">${c.phone}</a>`:'—';
+        const daysStyle=daysOverdue>7?'color:var(--red);font-weight:700':daysOverdue>3?'color:var(--amber);font-weight:600':'color:var(--text2)';
+        return `<tr>
+          <td class="primary">${av}</td>
+          <td>${phone}</td>
+          <td>${freqBadge}</td>
+          <td style="font-family:'DM Mono',monospace;color:var(--green);font-weight:600">$${fmt(row.payment)}</td>
+          <td style="font-family:'DM Mono',monospace;color:var(--red)">$${fmt(bal)}</td>
+          <td style="color:var(--text2);white-space:nowrap">${fmtDate(row.dueDate)}</td>
+          ${showDays?`<td style="${daysStyle}">${daysOverdue} day${daysOverdue!==1?'s':''}</td>`:''}
+          <td style="white-space:nowrap">${can('write')?`<button class="btn btn-success btn-sm" onclick="openAddRepayForLoan('${l.id}')">+ Pay</button> `:''}
+              <button class="btn btn-ghost btn-sm" onclick="openLoanDetail('${l.id}')">View</button></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`;
+  };
+
+  pg.innerHTML=`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap">
+      <span style="font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Filter by frequency:</span>
+      <select id="dueFreqFilter" onchange="renderDuePayments()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 12px;font-size:12px;cursor:pointer">
+        <option value="">All Loans</option>
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+        <option value="monthly">Monthly</option>
+      </select>
+      ${freq?`<span style="font-size:11px;color:var(--text3)">Showing ${freq} loans only</span>`:''}
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:22px">
+      <div style="background:rgba(232,68,68,0.1);border:1px solid var(--red);border-radius:var(--radius);padding:16px;text-align:center">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--red);margin-bottom:6px">Overdue</div>
+        <div style="font-size:32px;font-weight:700;font-family:'Playfair Display',serif;color:var(--red)">${overdueList.length}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">loans behind schedule</div>
+      </div>
+      <div style="background:rgba(240,168,50,0.1);border:1px solid var(--amber);border-radius:var(--radius);padding:16px;text-align:center">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--amber);margin-bottom:6px">Due Today</div>
+        <div style="font-size:32px;font-weight:700;font-family:'Playfair Display',serif;color:var(--amber)">${dueToday.length}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">${fmtDate(tzd)}</div>
+      </div>
+      <div style="background:rgba(74,141,245,0.1);border:1px solid var(--blue);border-radius:var(--radius);padding:16px;text-align:center">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--blue);margin-bottom:6px">Due Tomorrow</div>
+        <div style="font-size:32px;font-weight:700;font-family:'Playfair Display',serif;color:var(--blue)">${dueTomorrow.length}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">${fmtDate(tzTomorrow)}</div>
+      </div>
+    </div>
+
+    ${overdueList.length?`
+    <div class="card" style="margin-bottom:18px">
+      <div class="card-header"><span class="card-title" style="color:var(--red)">🚨 Overdue Payments (${overdueList.length})</span></div>
+      <div class="card-body" style="padding:0">${renderTable(overdueList,'',true)}</div>
+    </div>`:''}
+
+    <div class="card" style="margin-bottom:18px">
+      <div class="card-header"><span class="card-title" style="color:var(--amber)">⏰ Due Today — ${fmtDate(tzd)} (${dueToday.length})</span></div>
+      <div class="card-body" style="padding:0">${renderTable(dueToday,'✅ No payments due today',false)}</div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><span class="card-title" style="color:var(--blue)">📅 Due Tomorrow — ${fmtDate(tzTomorrow)} (${dueTomorrow.length})</span></div>
+      <div class="card-body" style="padding:0">${renderTable(dueTomorrow,'No payments due tomorrow',false)}</div>
+    </div>`;
+
+  updateDueBadge();
+}
 // ================================================================
 function renderDashboard(){
   const al=loans.filter(l=>getLoanStatus(l)==='active');
