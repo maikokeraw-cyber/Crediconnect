@@ -160,7 +160,8 @@ const mapLoan = (r, totalPaid) => {
     purpose: r.purpose || '', notes: r.notes || '',
     adminFees: Number(r.admin_fees || 0),
     adminFeesStatus: r.admin_fees_status || 'none',
-    status: computedStatus, addedBy: r.added_by || '', branchId: r.branch_id || ''
+    status: computedStatus, addedBy: r.added_by || '', branchId: r.branch_id || '',
+    repaymentStartDate: r.repayment_start_date ? r.repayment_start_date.toISOString().slice(0,10) : ''
   };
 };
 const mapAdminFee = r => ({ id:r.id, loanId:r.loan_id, amount:Number(r.amount), date:r.date?r.date.toISOString().slice(0,10):'', notes:r.notes||'', addedBy:r.added_by||'' });
@@ -418,14 +419,14 @@ app.get('/api/loans', requireAuth, requireDB, async (req, res) => {
 
 app.post('/api/loans', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
   try {
-    const { clientId, amount, interestRate, term, termFrequency, startDate, purpose, notes, adminFees, adminFeesPaid, branchId } = req.body;
+    const { clientId, amount, interestRate, term, termFrequency, startDate, repaymentStartDate, purpose, notes, adminFees, adminFeesPaid, branchId } = req.body;
     if (!clientId || !amount || !interestRate || !term || !startDate) return res.status(400).json({ error: 'Missing required fields' });
     const id = uuidv4();
     const adminFeesStatus = adminFees > 0 ? 'paid' : 'none'; // Always retained at disbursement
     await pool.query(
-      `INSERT INTO loans (id,client_id,amount,interest_rate,term,term_frequency,start_date,purpose,notes,admin_fees,admin_fees_status,branch_id,added_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-      [id, clientId, amount, interestRate, term, termFrequency||'monthly', startDate, purpose||null, notes||null, adminFees||0, adminFeesStatus, branchId||req.user.branchId||req.user.branch_id||null, req.user.id]
+      `INSERT INTO loans (id,client_id,amount,interest_rate,term,term_frequency,start_date,repayment_start_date,purpose,notes,admin_fees,admin_fees_status,branch_id,added_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      [id, clientId, amount, interestRate, term, termFrequency||'monthly', startDate, repaymentStartDate||null, purpose||null, notes||null, adminFees||0, adminFeesStatus, branchId||req.user.branchId||req.user.branch_id||null, req.user.id]
     );
     // Always record admin fee as retained at disbursement
     if (adminFees > 0) {
@@ -500,17 +501,27 @@ app.post('/api/repayments', requireAuth, requireDB, requireRole('admin','loan_of
       const totalPaid   = Number(paidRes.rows[0].paid);
       // Check if overdue based on amortisation schedule
       const startDate   = new Date(loan.start_date);
+      const repayStart  = loan.repayment_start_date ? new Date(loan.repayment_start_date) : null;
+      const baseDate    = repayStart || startDate;
       const freq        = loan.term_frequency || 'monthly';
       const term        = Number(loan.term);
       const periodicPay = totalOwed / term;
       let duePeriods    = 0;
-      const todayDate   = new Date();
+      const todayDate   = new Date(new Date().getTime() + 2*60*60*1000); // Zimbabwe UTC+2
+      const skipSun     = (d) => { if(d.getDay()===0) d.setDate(d.getDate()+1); return d; };
       for(let i=1; i<=term; i++){
-        const due = new Date(startDate);
-        if(freq==='monthly')     due.setMonth(due.getMonth()+i);
-        else if(freq==='weekly') due.setDate(due.getDate()+(i*7));
-        else                     due.setDate(due.getDate()+i);
-        if(due <= todayDate) duePeriods++;
+        const due = new Date(baseDate);
+        if(repayStart){
+          if(freq==='monthly')     due.setMonth(due.getMonth()+(i-1));
+          else if(freq==='weekly') due.setDate(due.getDate()+((i-1)*7));
+          else                     due.setDate(due.getDate()+(i-1));
+        } else {
+          if(freq==='monthly')     due.setMonth(due.getMonth()+i);
+          else if(freq==='weekly') due.setDate(due.getDate()+(i*7));
+          else                     due.setDate(due.getDate()+i);
+        }
+        skipSun(due);
+        if(due < todayDate) duePeriods++;
       }
       const isOverdue = duePeriods > 0 && totalPaid < (duePeriods * periodicPay) - 0.005;
       let newStatus;

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Credinova v4.2 — Financial Solutions</title>
+<title>Credinova v4.3 — Financial Solutions</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
@@ -236,7 +236,7 @@ input::placeholder{color:var(--text3)}
   </div>
   <div id="appLayout">
     <nav id="sidebar">
-      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v4.2</div></div>
+      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v4.3</div></div>
       <div class="nav">
         <div class="nav-section">Overview</div>
         <div class="nav-item active" id="nav-dashboard" onclick="navigate('dashboard')" class="nav-item-admin-only"><span class="icon">📊</span>Dashboard</div>
@@ -348,13 +348,14 @@ input::placeholder{color:var(--text3)}
     <div class="form-group"><label>Interest Rate (%) *</label><input id="fLR" type="number" placeholder="12" step="0.5"></div>
     <div class="form-group"><label>Term (Number) *</label><input id="fLT" type="number" placeholder="12"></div>
     <div class="form-group"><label>Term Frequency *</label>
-      <select id="fLF">
+      <select id="fLF" onchange="suggestRepayStart()">
         <option value="monthly">Monthly</option>
         <option value="weekly">Weekly</option>
         <option value="daily">Daily</option>
       </select>
     </div>
-    <div class="form-group"><label>Disbursement Date *</label><input id="fLD" type="date"></div>
+    <div class="form-group"><label>Disbursement Date *</label><input id="fLD" type="date" onchange="suggestRepayStart()"></div>
+    <div class="form-group"><label>First Repayment Date *<span style="font-size:10px;color:var(--gold2);margin-left:6px">When repayments begin</span></label><input id="fLRS" type="date" onchange="updateLoanPreview()"></div>
     <div class="form-group"><label>Purpose</label><input id="fLP" placeholder="Business, Agriculture…"></div>
     <div class="form-group"><label>Admin Fees * <span style="font-size:10px;color:var(--text3)">(deducted from principal)</span></label><input id="fLAF" type="number" placeholder="0.00" step="0.01" min="0"></div>
     <div class="form-group full"><label>Notes</label><textarea id="fLN" placeholder="Additional notes…"></textarea></div>
@@ -866,7 +867,7 @@ function updateStorageInfo(){
     ? `<span style="color:var(--green)">● Supabase PostgreSQL</span>`
     : `<span style="color:var(--amber)">● localStorage (offline)</span>`;
   const bLabel=isSuperAdmin()?(activeBranch?`Branch:${branches.find(b=>b.id===activeBranch)?.name||activeBranch.slice(-4)}`:'All'):(currentUser?.branchId?`Branch:${branches.find(b=>b.id===currentUser.branchId)?.name||'ID:'+currentUser.branchId.slice(-4)}`:'⚠️ No Branch');
-document.getElementById('storageInfo').innerHTML=`v4.2 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
+document.getElementById('storageInfo').innerHTML=`v4.3 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
 }
 
 // ================================================================
@@ -1407,7 +1408,8 @@ function saveLoan(){
   const cashToCustomer=amount-adminFees;
   if(cashToCustomer<0)return toast('Admin fees cannot exceed the loan amount.','error');
   if(!confirm('Confirm Disbursement\n\nLoan Amount:         $'+fmt(amount)+'\nAdmin Fee (retained): -$'+fmt(adminFees)+'\nCash to Customer:    $'+fmt(cashToCustomer)+'\n\nAll repayment calculations remain based on the full loan amount of $'+fmt(amount)+'.\n\nProceed?')) return;
-  addLoan({clientId,amount,interestRate:rate,term,termFrequency:freq,startDate:date,purpose:document.getElementById('fLP').value.trim(),notes:document.getElementById('fLN').value.trim(),adminFees,adminFeesPaid:true,branchId:myBranchId()}).then(r=>{
+  const repayStart=document.getElementById('fLRS')?.value||'';
+  addLoan({clientId,amount,interestRate:rate,term,termFrequency:freq,startDate:date,repaymentStartDate:repayStart||null,purpose:document.getElementById('fLP').value.trim(),notes:document.getElementById('fLN').value.trim(),adminFees,adminFeesPaid:true,branchId:myBranchId()}).then(r=>{
     // Admin fee always retained at disbursement — record immediately
     if(!USE_DB){
       const c=clients.find(c=>c.id===clientId);
@@ -1423,6 +1425,12 @@ function saveLoan(){
 }
 
 // ── Amortisation helpers ─────────────────────────────────────────
+// Skip Sunday → move to Monday (applies to all loan types)
+function skipSunday(d){
+  if(d.getDay()===0) d.setDate(d.getDate()+1);
+  return d;
+}
+
 function buildAmortisation(loan){
   const totalInterest    = loan.amount * loan.interestRate / 100;
   const periodicInterest = totalInterest / loan.term;
@@ -1431,18 +1439,43 @@ function buildAmortisation(loan){
   const freq             = loan.termFrequency || 'monthly';
   const rows = [];
   let balance = loan.amount;
-  const start = new Date(loan.startDate + 'T00:00:00');
+  // Use repaymentStartDate if set, otherwise derive from disbursement date
+  const baseStr = loan.repaymentStartDate || loan.startDate;
+  const base = new Date(baseStr + 'T00:00:00');
   for(let m = 1; m <= loan.term; m++){
-    const due = new Date(start);
-    if(freq==='monthly')      due.setMonth(due.getMonth()+m);
-    else if(freq==='weekly')  due.setDate(due.getDate()+(m*7));
-    else                      due.setDate(due.getDate()+m); // daily
+    const due = new Date(base);
+    if(loan.repaymentStartDate){
+      // Build forward from first repayment date
+      if(freq==='monthly')     due.setMonth(due.getMonth()+(m-1));
+      else if(freq==='weekly') due.setDate(due.getDate()+((m-1)*7));
+      else                     due.setDate(due.getDate()+(m-1)); // daily
+    } else {
+      // Legacy: build from disbursement date + offset
+      if(freq==='monthly')     due.setMonth(due.getMonth()+m);
+      else if(freq==='weekly') due.setDate(due.getDate()+(m*7));
+      else                     due.setDate(due.getDate()+m);
+    }
+    skipSunday(due); // move Sunday → Monday for all frequencies
     balance = Math.max(0, balance - periodicPrincipal);
     rows.push({ month:m, dueDate:due.toISOString().slice(0,10), payment:periodicPayment, principal:periodicPrincipal, interest:periodicInterest, balance });
   }
   return rows;
 }
 
+// Auto-suggest first repayment date based on disbursement date + frequency
+function suggestRepayStart(){
+  const d = document.getElementById('fLD')?.value;
+  const f = document.getElementById('fLF')?.value || 'monthly';
+  const rs = document.getElementById('fLRS');
+  if(!d || !rs) return;
+  const base = new Date(d + 'T00:00:00');
+  if(f==='daily')       base.setDate(base.getDate()+1);
+  else if(f==='weekly') base.setDate(base.getDate()+7);
+  else                  base.setMonth(base.getMonth()+1);
+  skipSunday(base);
+  rs.value = base.toISOString().slice(0,10);
+  updateLoanPreview();
+}
 function periodicInterestForLoan(loan){
   return loan.amount * loan.interestRate / 100 / loan.term;
 }
