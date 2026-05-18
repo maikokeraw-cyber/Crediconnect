@@ -663,6 +663,24 @@ function enterApp(){
 // ================================================================
 //  PERMISSIONS
 // ================================================================
+// Disable a button while async work runs — prevents double submit
+function btnLock(id, loadingText){
+  const b=document.getElementById(id); if(!b) return;
+  b.disabled=true; b._orig=b.textContent; b.textContent=loadingText||'Saving…';
+}
+function btnUnlock(id){
+  const b=document.getElementById(id); if(!b) return;
+  b.disabled=false; b.textContent=b._orig||'Save';
+}
+// Find and lock the primary button in any open modal
+function lockModal(text){
+  const btn=document.querySelector('.modal-backdrop.open .btn-primary,.modal-backdrop.open .btn-success');
+  if(btn){ btn.disabled=true; btn._orig=btn.textContent; btn.textContent=text||'Saving…'; }
+  return btn;
+}
+function unlockModal(btn){
+  if(btn){ btn.disabled=false; btn.textContent=btn._orig||'Save'; }
+}
 function can(action){
   if (!currentUser) return false;
   const r = currentUser.role;
@@ -1247,6 +1265,7 @@ function openAddClient(){
 function saveClient(){
   const name=document.getElementById('fCN').value.trim(), phone=document.getElementById('fCP').value.trim();
   if(!name||!phone) return toast('Name and phone are required','error');
+  const _sb=lockModal('Adding…');
   // Determine branch — super admin picks from dropdown, others use their own branch
   const selectedBranch = document.getElementById('fClientBranch')?.value || null;
   const branchId = isSuperAdmin() ? (selectedBranch || activeBranch || null) : myBranchId();
@@ -1256,7 +1275,7 @@ function saveClient(){
   addClient(data).then(()=>{
     addAudit('ADD_CLIENT','Client',data.id||'','Added '+name);
     CM('mAddClient');renderClients();updateStorageInfo();toast(`Client "${name}" added`,'success');
-  }).catch(e=>toast('Error: '+e.message,'error'));
+  }).catch(e=>toast('Error: '+e.message,'error')).finally(()=>unlockModal(_sb));
 }
 
 function openClientDetail(id){
@@ -1381,6 +1400,7 @@ function saveLoan(){
   const adminFees=parseFloat(document.getElementById('fLAF').value);
   if(!myBranchId()&&!isSuperAdmin()) return toast('Cannot disburse loan — your account has no branch assigned. Ask your Super Admin.','error');
   if(!clientId||!amount||!rate||!term||!date)return toast('Please fill all required fields','error');
+  const _slb=lockModal('Disbursing…');
   if(!adminFees&&adminFees!==0)return toast('Admin Fees is required. Enter 0 if no fees apply.','error');
   if(adminFees<0)return toast('Admin Fees cannot be negative.','error');
   const dateErr=validateDate(date,'Disbursement date'); if(dateErr)return toast(dateErr,'error');
@@ -1577,6 +1597,7 @@ async function saveEditLoan(){
   if(!amount||!rate||!term||!date) return toast('Please fill all required fields','error');
   const dateErrL=validateDate(date,'Disbursement date'); if(dateErrL)return toast(dateErrL,'error');
   const loan = loans.find(l=>l.id===_editLoanId); if(!loan) return;
+  const _selb=lockModal('Saving…');
   const updated = {...loan,amount,interestRate:rate,term,termFrequency:freq,startDate:date,status,purpose,adminFees,notes};
   if(USE_DB){
     try{
@@ -1584,11 +1605,12 @@ async function saveEditLoan(){
       Object.assign(loan, updated); saveAll();
       addAudit('EDIT_LOAN','Loan',_editLoanId,`Updated loan $${amount}`);
       CM('mEditLoan'); renderLoans(); toast('Loan updated','success');
-    }catch(e){ toast('Error: '+e.message,'error'); }
+    }catch(e){ toast('Error: '+e.message,'error'); }finally{ unlockModal(_selb); }
   } else {
     Object.assign(loan, updated); saveAll();
     addAudit('EDIT_LOAN','Loan',_editLoanId,`Updated loan $${amount}`);
     CM('mEditLoan'); renderLoans(); toast('Loan updated','success');
+    unlockModal(_selb);
   }
 }
 
@@ -1610,17 +1632,19 @@ async function saveEditRepayment(){
   if(!amount||!date) return toast('Amount and date are required','error');
   const dateErrRP=validateDate(date,'Payment date'); if(dateErrRP)return toast(dateErrRP,'error');
   const r=repayments.find(r=>r.id===_editRepayId); if(!r) return;
+  const _serb=lockModal('Saving…');
   if(USE_DB){
     try{
       await apiFetch('PUT',`/api/repayments/${_editRepayId}`,{amount,date,notes});
       r.amount=amount; r.date=date; r.notes=notes; saveAll();
       addAudit('EDIT_REPAYMENT','Repayment',_editRepayId,`Updated to $${amount}`);
       CM('mEditRepay'); renderRepayments(); toast('Repayment updated','success');
-    }catch(e){ toast('Error: '+e.message,'error'); }
+    }catch(e){ toast('Error: '+e.message,'error'); }finally{ unlockModal(_serb); }
   } else {
     r.amount=amount; r.date=date; r.notes=notes; saveAll();
     addAudit('EDIT_REPAYMENT','Repayment',_editRepayId,`Updated to $${amount}`);
     CM('mEditRepay'); renderRepayments(); toast('Repayment updated','success');
+    unlockModal(_serb);
   }
 }
 
@@ -1695,6 +1719,7 @@ function updateRepayInfo(){
 async function saveRepay(){
   const loanId=document.getElementById('fRL').value,amount=parseFloat(document.getElementById('fRA').value),date=document.getElementById('fRD').value;
   if(!loanId||!amount||!date)return toast('Please fill all required fields','error');
+  const _srb=lockModal('Recording…');
   const dateErrR=validateDate(date,'Payment date'); if(dateErrR)return toast(dateErrR,'error');
   const loan=loans.find(l=>l.id===loanId);
   if(!loan) return toast('Loan not found','error');
@@ -1747,7 +1772,7 @@ async function saveRepay(){
       CM('mAddRepay');renderRepayments();updateStorageInfo();
       toast('Payment of $'+fmt(amount)+' recorded','success');
     }
-  }).catch(e=>toast('Error: '+e.message,'error'));
+  }).catch(e=>toast('Error: '+e.message,'error')).finally(()=>unlockModal(_srb));
 }
 function deleteRepayment(id){
   if(!confirm('Delete this payment?'))return;
@@ -1814,7 +1839,7 @@ function saveExpense(){
   addExpenseData({amount,category,description:document.getElementById('fEDesc').value.trim(),date,branchId:myBranchId()}).then(r=>{
     addAudit('ADD_EXPENSE','Expense',r.id,`$${amount} — ${category}`);
     CM('mAddExpense');renderExpenses();updateStorageInfo();toast(`Expense of $${fmt(amount)} recorded`,'success');
-  }).catch(e=>toast('Error: '+e.message,'error'));
+  }).catch(e=>toast('Error: '+e.message,'error')).finally(()=>unlockModal(_seb));
 }
 function deleteExpense(id){
   if(!confirm('Delete this expense?'))return;
@@ -2081,6 +2106,7 @@ async function saveUser(){
   if(pwd && pwd !== pwd2)               return toast('Passwords do not match','error');
   if(pwd && pwd.length < 6)            return toast('Password must be at least 6 characters','error');
   if(!_editUserId && !pwd)             return toast('Password is required for new user','error');
+  const _sub=lockModal(_editUserId?'Updating…':'Creating…');
 
   if(USE_DB){
     try{
@@ -2095,7 +2121,7 @@ async function saveUser(){
       }
       CM('mUser');
       renderUsers();
-    } catch(e){ toast('Error: '+e.message,'error'); }
+    } catch(e){ toast('Error: '+e.message,'error'); } finally{ unlockModal(_sub); }
   } else {
     if(_editUserId){
       const u = users.find(u=>u.id===_editUserId);
@@ -2230,17 +2256,19 @@ async function changePassword(){
   if(!cur||!np||!np2)return toast('Please fill all fields','error');
   if(np!==np2)return toast('New passwords do not match','error');
   if(np.length<6)return toast('Password must be at least 6 characters','error');
+  const _cpb=lockModal('Changing…');
   if(USE_DB){
     try{ await apiFetch('POST','/api/auth/change-password',{currentPassword:cur,newPassword:np}); toast('Password changed successfully','success');['cpC','cpN','cpN2'].forEach(i=>document.getElementById(i).value=''); }
-    catch(e){toast('Error: '+e.message,'error');}
+    catch(e){toast('Error: '+e.message,'error');}finally{unlockModal(_cpb);}
   } else {
     const curHash=await hashPwd(cur);
     const u=users.find(u=>u.id===currentUser.id);
-    if(!u||u.passwordHash!==curHash)return toast('Current password is incorrect','error');
+    if(!u||u.passwordHash!==curHash){unlockModal(_cpb);return toast('Current password is incorrect','error');}
     u.passwordHash=await hashPwd(np);lsSet(K.users,users);
     addAudit('CHANGE_PASSWORD','User',currentUser.id,'Password changed');
     ['cpC','cpN','cpN2'].forEach(i=>document.getElementById(i).value='');
     toast('Password changed successfully','success');
+    unlockModal(_cpb);
   }
 }
 
