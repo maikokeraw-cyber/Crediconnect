@@ -507,21 +507,33 @@ app.post('/api/repayments', requireAuth, requireDB, requireRole('admin','loan_of
       const term        = Number(loan.term);
       const periodicPay = totalOwed / term;
       let duePeriods    = 0;
-      const todayDate   = new Date(new Date().getTime() + 2*60*60*1000); // Zimbabwe UTC+2
       const skipSun     = (d) => { if(d.getDay()===0) d.setDate(d.getDate()+1); return d; };
-      for(let i=1; i<=term; i++){
-        const due = new Date(baseDate);
-        if(repayStart){
-          if(freq==='monthly')     due.setMonth(due.getMonth()+(i-1));
-          else if(freq==='weekly') due.setDate(due.getDate()+((i-1)*7));
-          else                     due.setDate(due.getDate()+(i-1));
-        } else {
-          if(freq==='monthly')     due.setMonth(due.getMonth()+i);
-          else if(freq==='weekly') due.setDate(due.getDate()+(i*7));
-          else                     due.setDate(due.getDate()+i);
+      // Zimbabwe time UTC+2
+      const nowZW       = new Date(new Date().getTime() + 2*60*60*1000);
+      const todayZWStr  = nowZW.toISOString().slice(0,10);
+
+      if(freq === 'daily'){
+        // Daily: step day by day, skip Sundays
+        const cursor = new Date(baseDate);
+        if(!repayStart) cursor.setDate(cursor.getDate()+1);
+        for(let i=1; i<=term; i++){
+          if(i>1) cursor.setDate(cursor.getDate()+1);
+          while(cursor.getDay()===0) cursor.setDate(cursor.getDate()+1);
+          if(cursor.toISOString().slice(0,10) < todayZWStr) duePeriods++;
         }
-        skipSun(due);
-        if(due < todayDate) duePeriods++;
+      } else {
+        for(let i=1; i<=term; i++){
+          const due = new Date(baseDate);
+          if(repayStart){
+            if(freq==='monthly') due.setMonth(due.getMonth()+(i-1));
+            else                 due.setDate(due.getDate()+((i-1)*7));
+          } else {
+            if(freq==='monthly') due.setMonth(due.getMonth()+i);
+            else                 due.setDate(due.getDate()+(i*7));
+          }
+          skipSun(due);
+          if(due.toISOString().slice(0,10) < todayZWStr) duePeriods++;
+        }
       }
       const isOverdue = duePeriods > 0 && totalPaid < (duePeriods * periodicPay) - 0.005;
       let newStatus;
