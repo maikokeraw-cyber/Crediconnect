@@ -1967,7 +1967,26 @@ function renderReports(){
   if(!can('admin')){document.getElementById('repContent').innerHTML=permDenied('Reports are for Administrators only.');return;}
   const td=loans.reduce((s,l)=>s+l.amount,0),ti=loans.reduce((s,l)=>s+(l.amount*l.interestRate/100),0);
   const tc=repayments.reduce((s,r)=>s+r.amount,0),al=loans.filter(l=>getLoanStatus(l)==='active');
-  const to=al.reduce((s,l)=>s+getLoanBalance(l.id),0),par=td>0?(to/td*100).toFixed(1):0;
+  const to=al.reduce((s,l)=>s+getLoanBalance(l.id),0);
+  // True PAR30: outstanding balance of loans where a payment is 30+ days overdue
+  // Numerator = sum of balances of loans with at least one payment 30+ days late
+  // Denominator = total outstanding balance of ALL active loans
+  const todayD=new Date(todayZW()+'T00:00:00');
+  const par30Loans=al.filter(l=>{
+    const amort=buildAmortisation(l);
+    const overduePeriods=amort.filter(r=>{
+      const due=new Date(r.dueDate+'T00:00:00');
+      const daysLate=Math.floor((todayD-due)/86400000);
+      return daysLate>=30;
+    });
+    if(!overduePeriods.length) return false;
+    // Check if those periods are actually unpaid
+    const paid=getLoanPaid(l.id);
+    const totalDue=overduePeriods.length*(getLoanTotal(l)/l.term);
+    return paid < totalDue - 0.005;
+  });
+  const par30Bal=par30Loans.reduce((s,l)=>s+getLoanBalance(l.id),0);
+  const par=to>0?(par30Bal/to*100).toFixed(1):0;
   document.getElementById('repContent').innerHTML=`
     <!-- Admin Fees Section -->
     <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:22px">
@@ -2019,15 +2038,34 @@ function renderReports(){
       <div class="stat-card gold"><span class="stat-icon">📊</span><div class="stat-label">Loan Book</div><div class="stat-value">$${fmt(td)}</div><div class="stat-sub">${loans.length} loans</div></div>
       <div class="stat-card green"><span class="stat-icon">💵</span><div class="stat-label">Interest Accrued</div><div class="stat-value">$${fmt(ti)}</div><div class="stat-sub">Total interest</div></div>
       <div class="stat-card blue"><span class="stat-icon">📈</span><div class="stat-label">Collection Rate</div><div class="stat-value">${td>0?(tc/(td+ti)*100).toFixed(1):0}%</div><div class="stat-sub">Of total owed</div></div>
-      <div class="stat-card red"><span class="stat-icon">⚖️</span><div class="stat-label">PAR Ratio</div><div class="stat-value">${par}%</div><div class="stat-sub">Portfolio at Risk</div></div>
+      <div class="stat-card ${par<=5?'green':par<=10?'amber':'red'}"><span class="stat-icon">⚖️</span><div class="stat-label">PAR30</div><div class="stat-value">${par}%</div><div class="stat-sub">${par30Loans.length} loan${par30Loans.length!==1?'s':''} · ${par<=5?'✅ Healthy':par<=10?'⚠️ Watch':'🚨 Critical'}</div></div>
     </div>
     <div class="two-col">
       <div class="card"><div class="card-header"><span class="card-title">Loan Status</span></div><div class="card-body"><div class="chart-container"><canvas id="cStatus"></canvas></div></div></div>
       <div class="card"><div class="card-header"><span class="card-title">Collection Trend (6mo)</span></div><div class="card-body"><div class="chart-container"><canvas id="cColl"></canvas></div></div></div>
     </div>
     <div class="two-col">
-      <div class="card"><div class="card-header"><span class="card-title">Portfolio at Risk</span></div><div class="card-body">
-        ${al.map(l=>{const c=clients.find(c=>c.id===l.clientId),bal=getLoanBalance(l.id),tot=getLoanTotal(l),pct=Math.round(bal/tot*100);return`<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2);margin-bottom:4px"><span>${c?c.name:'?'} — ${l.purpose||'Loan'}</span><span style="color:${pct>70?'var(--red)':pct>40?'var(--amber)':'var(--green)'}">$${fmt(bal)} (${pct}%)</span></div><div class="progress-bar"><div class="progress-fill ${pct>70?'red':pct>40?'amber':''}" style="width:${pct}%"></div></div></div>`;}).join('')||'<p style="color:var(--text3)">No active loans</p>'}
+      <div class="card"><div class="card-header"><span class="card-title">PAR30 — Loans 30+ Days Overdue</span></div><div class="card-body">
+        ${par30Loans.length===0
+          ? '<div style="text-align:center;padding:20px;color:var(--green)">✅ No loans are 30+ days overdue</div>'
+          : par30Loans.map(l=>{
+              const c=clients.find(c=>c.id===l.clientId),bal=getLoanBalance(l.id),tot=getLoanTotal(l),pct=Math.round(bal/tot*100);
+              const amort=buildAmortisation(l);
+              const worstDue=amort.filter(r=>Math.floor((todayD-new Date(r.dueDate+'T00:00:00'))/86400000)>=30).pop();
+              const daysLate=worstDue?Math.floor((todayD-new Date(worstDue.dueDate+'T00:00:00'))/86400000):0;
+              return`<div style="margin-bottom:12px;padding:10px;background:var(--surface);border-radius:var(--radius-sm);border-left:3px solid var(--red)">
+                <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px">
+                  <span style="font-weight:600">${c?c.name:'?'}</span>
+                  <span style="color:var(--red);font-weight:700">${daysLate} days late</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:6px">
+                  <span>${l.purpose||'Loan'} · $${fmt(l.amount)}</span>
+                  <span>Balance: <strong style="color:var(--red)">$${fmt(bal)}</strong></span>
+                </div>
+                <div class="progress-bar"><div class="progress-fill red" style="width:${pct}%"></div></div>
+              </div>`;
+            }).join('')
+        }
       </div></div>
       <div class="card"><div class="card-header"><span class="card-title">Loan Size Distribution</span></div><div class="card-body"><div class="chart-container"><canvas id="cDist"></canvas></div></div></div>
     </div>`;
