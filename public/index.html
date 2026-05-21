@@ -1336,18 +1336,24 @@ async function saveEditClient(){
   const name=document.getElementById('eCN').value.trim(),phone=document.getElementById('eCP').value.trim();
   if(!name||!phone)return toast('Name and phone are required','error');
   const c=clients.find(c=>c.id===_editClientId);if(!c)return;
+  const _sb=lockModal('Saving…');
   const updated={...c,name,phone,nationalId:document.getElementById('eCI').value.trim(),email:document.getElementById('eCE').value.trim(),address:document.getElementById('eCA').value.trim(),occupation:document.getElementById('eCO').value.trim(),dob:document.getElementById('eCD').value||''};
+  // Build a human-readable diff of what changed
+  const fields={name:'Name',phone:'Phone',nationalId:'National ID',email:'Email',address:'Address',occupation:'Occupation',dob:'Date of Birth'};
+  const changes=Object.keys(fields).filter(k=>(c[k]||'')!==(updated[k]||'')).map(k=>`${fields[k]}: "${c[k]||'—'}" → "${updated[k]||'—'}"`);
+  const detail=changes.length?changes.join(' | '):'No changes';
   if(USE_DB){
     try{
       await apiFetch('PUT',`/api/clients/${_editClientId}`,updated);
       Object.assign(c,updated);saveAll();
-      addAudit('EDIT_CLIENT','Client',_editClientId,`Updated ${name}`);
+      addAudit('EDIT_CLIENT','Client',_editClientId,detail);
       CM('mEditClient');renderClients();updateStorageInfo();toast('Client updated','success');
-    }catch(e){toast('Error: '+e.message,'error');}
+    }catch(e){toast('Error: '+e.message,'error');}finally{unlockModal(_sb);}
   } else {
     Object.assign(c,updated);saveAll();
-    addAudit('EDIT_CLIENT','Client',_editClientId,`Updated ${name}`);
+    addAudit('EDIT_CLIENT','Client',_editClientId,detail);
     CM('mEditClient');renderClients();updateStorageInfo();toast('Client updated','success');
+    unlockModal(_sb);
   }
 }
 
@@ -1648,16 +1654,20 @@ async function saveEditLoan(){
   const loan = loans.find(l=>l.id===_editLoanId); if(!loan) return;
   const _selb=lockModal('Saving…');
   const updated = {...loan,amount,interestRate:rate,term,termFrequency:freq,startDate:date,status,purpose,adminFees,notes};
+  // Diff what changed
+  const lFields={amount:'Amount',interestRate:'Rate',term:'Term',termFrequency:'Frequency',startDate:'Start Date',status:'Status',purpose:'Purpose',adminFees:'Admin Fees'};
+  const lChanges=Object.keys(lFields).filter(k=>String(loan[k]||'')!==String(updated[k]||'')).map(k=>`${lFields[k]}: "${loan[k]||'—'}" → "${updated[k]||'—'}"`);
+  const lDetail=lChanges.length?lChanges.join(' | '):`$${amount} loan — no field changes`;
   if(USE_DB){
     try{
       await apiFetch('PUT',`/api/loans/${_editLoanId}`,{amount,interestRate:rate,term,termFrequency:freq,startDate:date,status,purpose,adminFees,notes});
       Object.assign(loan, updated); saveAll();
-      addAudit('EDIT_LOAN','Loan',_editLoanId,`Updated loan $${amount}`);
+      addAudit('EDIT_LOAN','Loan',_editLoanId,lDetail);
       CM('mEditLoan'); renderLoans(); toast('Loan updated','success');
     }catch(e){ toast('Error: '+e.message,'error'); }finally{ unlockModal(_selb); }
   } else {
     Object.assign(loan, updated); saveAll();
-    addAudit('EDIT_LOAN','Loan',_editLoanId,`Updated loan $${amount}`);
+    addAudit('EDIT_LOAN','Loan',_editLoanId,lDetail);
     CM('mEditLoan'); renderLoans(); toast('Loan updated','success');
     unlockModal(_selb);
   }
