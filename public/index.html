@@ -323,7 +323,7 @@ input::placeholder{color:var(--text3)}
 <div class="modal-backdrop" id="mConfirmClient"><div class="modal">
   <div class="modal-header"><div class="modal-title">⚠️ Confirm Client Details</div><button class="modal-close" onclick="CM('mConfirmClient')">×</button></div>
   <div class="modal-body"><div id="confirmClientBody" style="font-size:13px"></div></div>
-  <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mConfirmClient')">← Go Back &amp; Edit</button><button class="btn btn-primary" id="confirmClientBtn" onclick="saveClient()">✅ Confirm &amp; Save</button></div>
+  <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mConfirmClient')">← Go Back &amp; Edit</button><button class="btn btn-primary" id="confirmClientBtn" onclick="this.disabled=true;this.textContent='Saving…';saveClient()">✅ Confirm &amp; Save</button></div>
 </div></div>
 
 <div class="modal-backdrop" id="mClientDetail"><div class="modal modal-wide">
@@ -1315,7 +1315,7 @@ function saveClient(){
   const data={name,phone,nationalId:document.getElementById('fCI').value.trim(),email:document.getElementById('fCE').value.trim(),address:document.getElementById('fCA').value.trim(),occupation:document.getElementById('fCO').value.trim(),dob:document.getElementById('fCD').value||'',dateAdded:today(),branchId};
   addClient(data).then(()=>{
     addAudit('ADD_CLIENT','Client',data.id||'','Added '+name);
-    CM('mAddClient');renderClients();updateStorageInfo();toast(`Client "${name}" added`,'success');
+    CM('mConfirmClient');CM('mAddClient');renderClients();updateStorageInfo();toast(`Client "${name}" added`,'success');
   }).catch(e=>toast('Error: '+e.message,'error')).finally(()=>unlockModal(_sb));
 }
 
