@@ -316,7 +316,14 @@ input::placeholder{color:var(--text3)}
       <select id="fClientBranch"><option value="">— Select Branch —</option></select>
     </div>
   </div></div>
-  <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mAddClient')">Cancel</button><button class="btn btn-primary" onclick="saveClient()">Save Client</button></div>
+  <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mAddClient')">Cancel</button><button class="btn btn-primary" onclick="reviewClient()">Review & Confirm</button></div>
+</div></div>
+
+<!-- Client Confirmation Modal -->
+<div class="modal-backdrop" id="mConfirmClient"><div class="modal">
+  <div class="modal-header"><div class="modal-title">⚠️ Confirm Client Details</div><button class="modal-close" onclick="CM('mConfirmClient')">×</button></div>
+  <div class="modal-body"><div id="confirmClientBody" style="font-size:13px"></div></div>
+  <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mConfirmClient')">← Go Back &amp; Edit</button><button class="btn btn-primary" id="confirmClientBtn" onclick="saveClient()">✅ Confirm &amp; Save</button></div>
 </div></div>
 
 <div class="modal-backdrop" id="mClientDetail"><div class="modal modal-wide">
@@ -1244,11 +1251,44 @@ function renderClients(){
       <td>${c.phone}</td><td style="font-family:'DM Mono',monospace;font-size:12px">${c.nationalId||'—'}</td>
       <td>${al?`<span class="badge badge-active">${al} active</span>`:'<span style="color:var(--text3)">None</span>'}</td>
       <td style="font-family:'DM Mono',monospace">$${fmt(bor)}</td><td>${fmtDate(c.dateAdded)}</td>
-      <td onclick="event.stopPropagation()">${can('write')?`<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditClient('${c.id}')">✏️ Edit</button> <button class="btn btn-ghost btn-sm" onclick="openAddLoan('${c.id}')">+ Loan</button>`:''} ${can('delete')?`<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteClientDirect('${c.id}')">Delete</button>`:''}</td>
+      <td onclick="event.stopPropagation()">${can('admin')?`<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditClient('${c.id}')">✏️ Edit</button> `:''}${can('write')?`<button class="btn btn-ghost btn-sm" onclick="openAddLoan('${c.id}')">+ Loan</button>`:''} ${can('delete')?`<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteClientDirect('${c.id}')">Delete</button>`:''}</td>
     </tr>`;
   }).join('');
 }
 
+function reviewClient(){
+  // Validate first
+  const name=document.getElementById('fCN').value.trim();
+  const phone=document.getElementById('fCP').value.trim();
+  if(!name||!phone) return toast('Name and phone are required','error');
+  const branchId=isSuperAdmin()?(document.getElementById('fClientBranch')?.value||activeBranch||null):myBranchId();
+  if(isSuperAdmin()&&!branchId) return toast('Please select a branch for this client','error');
+  // Build summary
+  const branch=branches.find(b=>b.id===branchId);
+  const fields={
+    'Full Name':name,
+    'Phone':phone,
+    'National ID':document.getElementById('fCI').value.trim()||'—',
+    'Email':document.getElementById('fCE').value.trim()||'—',
+    'Address':document.getElementById('fCA').value.trim()||'—',
+    'Date of Birth':document.getElementById('fCD').value||'—',
+    'Occupation':document.getElementById('fCO').value.trim()||'—',
+    'Branch':branch?branch.name:'—'
+  };
+  document.getElementById('confirmClientBody').innerHTML=`
+    <div style="background:rgba(240,168,50,0.08);border:1px solid var(--amber);border-radius:var(--radius-sm);padding:12px;margin-bottom:14px;font-size:12px;color:var(--amber)">
+      Please review carefully before saving. Once saved this client will be added to the system.
+    </div>
+    <table style="width:100%;border-collapse:collapse">
+      ${Object.entries(fields).map(([k,v])=>`
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 10px;color:var(--text3);font-size:12px;width:35%">${k}</td>
+        <td style="padding:8px 10px;font-weight:${k==='Full Name'||k==='Phone'?'600':'400'};color:var(--text)">${v}</td>
+      </tr>`).join('')}
+    </table>`;
+  CM('mAddClient');
+  OM('mConfirmClient');
+}
 function openAddClient(){
   ['fCN','fCP','fCI','fCE','fCA','fCD','fCO'].forEach(i=>{const el=document.getElementById(i);if(el)el.value='';});
   // Super admin must choose a branch for new clients
@@ -1302,7 +1342,7 @@ function openClientDetail(id){
   document.getElementById('cdFooter').innerHTML=`
     ${can('delete')?`<button class="btn btn-danger btn-sm" onclick="deleteClient('${id}')">Delete Client</button>`:''}
     ${isSuperAdmin()?`<button class="btn btn-ghost btn-sm" onclick="openTransferClient('${id}')">&#x21C4; Transfer Branch</button>`:''}
-    ${can('write')?`<button class="btn btn-ghost btn-sm" onclick="CM('mClientDetail');openEditClient('${id}')">&#x270F;&#xFE0F; Edit</button>`:''}
+    ${can('admin')?`<button class="btn btn-ghost btn-sm" onclick="CM('mClientDetail');openEditClient('${id}')">&#x270F;&#xFE0F; Edit</button>`:''}
     ${can('write')?`<button class="btn btn-primary" onclick="CM('mClientDetail');openAddLoan('${id}')">+ Add Loan</button>`:''}
     <button class="btn btn-ghost" onclick="CM('mClientDetail')">Close</button>`;
   OM('mClientDetail');
