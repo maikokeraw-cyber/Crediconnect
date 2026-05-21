@@ -1351,9 +1351,12 @@ function deleteClientDirect(id){
   if(!can('delete')) return toast('You do not have permission to delete clients','error');
   const c=clients.find(c=>c.id===id);
   if(!c) return;
-  if(!confirm(`Delete client "${c.name}" and all their data? This cannot be undone.`)) return;
+  const clientName = String(c.name||'Unknown'); // capture name before async removes it
+  const clientPhone = String(c.phone||'');
+  if(!confirm(`Delete client "${clientName}" and all their data? This cannot be undone.`)) return;
+  // Save audit BEFORE deletion so client data is still accessible
+  addAudit('DELETE_CLIENT','Client',id,`Deleted: ${clientName} (${clientPhone})`);
   deleteClientData(id).then(()=>{
-    addAudit('DELETE_CLIENT','Client',id,'Deleted '+c.name);
     renderClients();updateStorageInfo();toast('Client deleted','success');
   }).catch(e=>toast('Error: '+e.message,'error'));
 }
@@ -2301,9 +2304,26 @@ async function renderAudit(){
   document.getElementById('audContent').innerHTML=`
     <div class="card"><div class="card-header"><span class="card-title">Activity Log (last 200 entries)</span>${!USE_DB?`<button class="btn btn-danger btn-sm" onclick="clearAudit()">Clear Log</button>`:''}</div>
     <div class="card-body" style="max-height:600px;overflow-y:auto">
-      ${(log||[]).slice(0,200).map(e=>`<div class="audit-row"><div class="audit-dot" style="background:${colors[e.action]||'var(--blue)'}"></div>
-      <div><div class="audit-action">${e.action.replace(/_/g,' ')}</div>
-      <div class="audit-meta">by <strong style="color:var(--text2)">@${e.username||'system'}</strong>${e.detail?' · '+e.detail:''} · ${fmtDT(e.createdAt)}</div></div></div>`).join('')||'<div style="color:var(--text3);text-align:center;padding:40px">No activity yet</div>'}
+      ${(log||[]).slice(0,200).map(e=>{
+        // Build display label — always show something useful
+        const detailStr = e.detail||'';
+        // For deletions with no detail, try to find the name from current data
+        let displayDetail = detailStr;
+        if(!displayDetail && e.action==='DELETE_CLIENT'){
+          const c=clients.find(c=>c.id===e.entityId);
+          displayDetail = c ? `Deleted: ${c.name}` : `Client ID: ${(e.entityId||'').slice(-8)}`;
+        }
+        if(!displayDetail && e.action==='DELETE_LOAN'){
+          const l=loans.find(l=>l.id===e.entityId);
+          const c=l?clients.find(c=>c.id===l.clientId):null;
+          displayDetail = c ? `Loan for ${c.name} $${fmt(l.amount)}` : `Loan ID: ${(e.entityId||'').slice(-8)}`;
+        }
+        if(!displayDetail && e.entityId) displayDetail = `ID: ${e.entityId.slice(-8)}`;
+        return `<div class="audit-row"><div class="audit-dot" style="background:${colors[e.action]||'var(--blue)'}"></div>
+        <div><div class="audit-action">${e.action.replace(/_/g,' ')}</div>
+        <div class="audit-meta">by <strong style="color:var(--text2)">@${e.username||'system'}</strong>${displayDetail?' · '+displayDetail:''} · ${fmtDT(e.createdAt)}</div>
+        </div></div>`;
+      }).join('')||'<div style="color:var(--text3);text-align:center;padding:40px">No activity yet</div>'}
     </div></div>`;
 }
 function clearAudit(){if(!confirm('Clear all audit log entries?'))return;auditLog=[];lsSet(K.audit,auditLog);renderAudit();toast('Audit log cleared','info');}
