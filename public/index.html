@@ -1320,9 +1320,12 @@ function deleteClientDirect(id){
 function deleteClient(id){ deleteClientDirect(id); CM('mClientDetail'); }
 
 let _editClientId=null;
+let _editClientSnapshot={}; // captures old values at moment modal opens
 function openEditClient(id){
   const c=clients.find(c=>c.id===id);if(!c)return;
   _editClientId=id;
+  // Snapshot the current values BEFORE any edits — used for diff in audit log
+  _editClientSnapshot={name:c.name||'',phone:c.phone||'',nationalId:c.nationalId||'',email:c.email||'',address:c.address||'',occupation:c.occupation||'',dob:c.dob||''};
   document.getElementById('eCN').value=c.name||'';
   document.getElementById('eCP').value=c.phone||'';
   document.getElementById('eCI').value=c.nationalId||'';
@@ -1338,9 +1341,10 @@ async function saveEditClient(){
   const c=clients.find(c=>c.id===_editClientId);if(!c)return;
   const _sb=lockModal('Saving…');
   const updated={...c,name,phone,nationalId:document.getElementById('eCI').value.trim(),email:document.getElementById('eCE').value.trim(),address:document.getElementById('eCA').value.trim(),occupation:document.getElementById('eCO').value.trim(),dob:document.getElementById('eCD').value||''};
-  // Build a human-readable diff of what changed
+  // Diff against snapshot taken when modal opened — guarantees accurate before/after
   const fields={name:'Name',phone:'Phone',nationalId:'National ID',email:'Email',address:'Address',occupation:'Occupation',dob:'Date of Birth'};
-  const changes=Object.keys(fields).filter(k=>(c[k]||'')!==(updated[k]||'')).map(k=>`${fields[k]}: "${c[k]||'—'}" → "${updated[k]||'—'}"`);
+  const old=_editClientSnapshot;
+  const changes=Object.keys(fields).filter(k=>(old[k]||'')!==(updated[k]||'')).map(k=>`${fields[k]}: "${old[k]||'—'}" → "${updated[k]||'—'}"`);
   const detail=changes.length?changes.join(' | '):'No changes';
   if(USE_DB){
     try{
