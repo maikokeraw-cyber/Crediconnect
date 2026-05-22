@@ -1628,20 +1628,43 @@ async function openLoanDetail(id){
           <th style="text-align:right;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px;border-bottom:1px solid var(--border)">Principal</th>
           <th style="text-align:right;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px;border-bottom:1px solid var(--border)">Interest</th>
           <th style="text-align:right;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px;border-bottom:1px solid var(--border)">Balance</th>
+          <th style="text-align:center;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px;border-bottom:1px solid var(--border)">Status</th>
         </tr></thead>
-        <tbody>${amort.map(row=>{
-          const isThis=nextDue&&row.dueDate===nextDue.dueDate;
-          const isNext=nextNextDue&&row.dueDate===nextNextDue.dueDate;
-          const bg=isThis?'background:rgba(240,168,50,0.07)':isNext?'background:rgba(74,141,245,0.07)':'';
-          return`<tr style="border-bottom:1px solid var(--border);${bg}">
-            <td style="padding:7px 10px;text-align:center;color:var(--text3)">${row.month}${isThis?' <span style="font-size:9px;background:var(--amber);color:#000;padding:1px 5px;border-radius:4px;font-weight:700">NOW</span>':isNext?' <span style="font-size:9px;background:var(--blue);color:#fff;padding:1px 5px;border-radius:4px;font-weight:700">NEXT</span>':''}</td>
-            <td style="padding:7px 10px;color:var(--text2)">${fmtDate(row.dueDate)}</td>
-            <td style="padding:7px 10px;text-align:right;font-family:'DM Mono',monospace;color:var(--green)">$${fmt(row.payment)}</td>
-            <td style="padding:7px 10px;text-align:right;font-family:'DM Mono',monospace;color:var(--blue)">$${fmt(row.principal)}</td>
-            <td style="padding:7px 10px;text-align:right;font-family:'DM Mono',monospace;color:var(--amber)">$${fmt(row.interest)}</td>
-            <td style="padding:7px 10px;text-align:right;font-family:'DM Mono',monospace;color:var(--text2)">$${fmt(row.balance)}</td>
-          </tr>`;
-        }).join('')}</tbody>
+        <tbody>${(()=>{
+          // Calculate per-period status from total paid
+          let runningPaid = getLoanPaid(freshLoan.id);
+          return amort.map(row=>{
+            const isThis=nextDue&&row.dueDate===nextDue.dueDate;
+            const isNext=nextNextDue&&row.dueDate===nextNextDue.dueDate;
+            const bg=isThis?'background:rgba(240,168,50,0.07)':isNext?'background:rgba(74,141,245,0.07)':'';
+            // Determine status for this period
+            let statusBadge, rowStyle='';
+            if(runningPaid >= row.payment - 0.005){
+              statusBadge='<span style="font-size:10px;background:rgba(39,201,122,0.15);color:var(--green);padding:2px 7px;border-radius:8px;font-weight:700">✓ PAID</span>';
+              rowStyle='opacity:0.6';
+              runningPaid = Math.max(0, runningPaid - row.payment);
+            } else if(runningPaid > 0.005){
+              const remaining = row.payment - runningPaid;
+              statusBadge=`<span style="font-size:10px;background:rgba(240,168,50,0.15);color:var(--amber);padding:2px 7px;border-radius:8px;font-weight:700">⚡ $${fmt(remaining)} left</span>`;
+              runningPaid = 0;
+            } else {
+              statusBadge = isThis
+                ? '<span style="font-size:9px;background:var(--amber);color:#000;padding:2px 6px;border-radius:4px;font-weight:700">DUE NOW</span>'
+                : isNext
+                ? '<span style="font-size:9px;background:var(--blue);color:#fff;padding:2px 6px;border-radius:4px;font-weight:700">NEXT</span>'
+                : '';
+            }
+            return`<tr style="border-bottom:1px solid var(--border);${bg}${rowStyle?';'+rowStyle:''}">
+              <td style="padding:7px 10px;text-align:center;color:var(--text3)">${row.month}</td>
+              <td style="padding:7px 10px;color:var(--text2)">${fmtDate(row.dueDate)}</td>
+              <td style="padding:7px 10px;text-align:right;font-family:'DM Mono',monospace;color:var(--green)">$${fmt(row.payment)}</td>
+              <td style="padding:7px 10px;text-align:right;font-family:'DM Mono',monospace;color:var(--blue)">$${fmt(row.principal)}</td>
+              <td style="padding:7px 10px;text-align:right;font-family:'DM Mono',monospace;color:var(--amber)">$${fmt(row.interest)}</td>
+              <td style="padding:7px 10px;text-align:right;font-family:'DM Mono',monospace;color:var(--text2)">$${fmt(row.balance)}</td>
+              <td style="padding:7px 10px;text-align:center">${statusBadge}</td>
+            </tr>`;
+          }).join('');
+        })()}</tbody>
       </table>
     </div>
 
