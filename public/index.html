@@ -258,7 +258,7 @@ input::placeholder{color:var(--text3)}
         <div class="nav-item" id="nav-profile" onclick="navigate('profile')"><span class="icon">⚙️</span>My Profile</div>
       </div>
       <div style="padding:6px 14px 2px;text-align:right">
-        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:0.5px">v3.0.0</span>
+        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:0.5px">v4.3</span>
       </div>
       <div class="sidebar-user">
         <div class="sidebar-avatar" id="sbAvatar">?</div>
@@ -267,7 +267,7 @@ input::placeholder{color:var(--text3)}
           <div class="sidebar-user-role" id="sbRole"></div>
           <div id="sbBranch" style="font-size:10px;color:var(--gold2);font-weight:600;margin-top:2px;display:none"></div>
         </div>
-        <button class="sidebar-logout" onclick="logout()" title="Sign out">⏻</button>
+        <button class="sidebar-logout" onclick="logout()" title="Sign out" style="font-size:16px;padding:6px 8px;border-radius:6px;flex-shrink:0;opacity:0.7" onmouseover="this.style.opacity='1';this.style.color='var(--red)'" onmouseout="this.style.opacity='0.7';this.style.color='var(--text3)'">⏻</button>
       </div>
     </nav>
     <div id="main">
@@ -616,19 +616,18 @@ async function doLogin(){
 }
 
 function logout(expired){
+  // Clear ALL auth data
   authToken = null; currentUser = null; activeBranch = null;
   localStorage.removeItem('cc_token');
-  // Always hide branch selector on logout
-  const bsw = document.getElementById('branchSelectorWrap');
-  if(bsw) bsw.style.display='none';
-  const sbBranch = document.getElementById('sbBranch');
-  if(sbBranch) sbBranch.style.display='none';
-  document.getElementById('appWrapper').classList.remove('visible');
-  document.getElementById('loginScreen').style.display = 'flex';
-  document.getElementById('lPass').value = '';
-  const errEl = document.getElementById('loginErr');
-  if (expired) { errEl.textContent = 'Session expired — please sign in again'; errEl.style.display = 'block'; }
-  else errEl.style.display = 'none';
+  sessionStorage.clear();
+  // Force a full page reload — this is the only reliable way to stop
+  // auto-login from re-triggering with in-memory state
+  if(expired){
+    sessionStorage.setItem('logout_reason','expired');
+  } else {
+    sessionStorage.setItem('logout_reason','manual');
+  }
+  window.location.reload();
 }
 
 function enterApp(){
@@ -2508,6 +2507,19 @@ function rds(from,to){const d=new Date();d.setDate(d.getDate()-(Math.floor(Math.
 //  INIT
 // ================================================================
 (async()=>{
+  // Check if we just logged out — skip auto-login entirely
+  const logoutReason = sessionStorage.getItem('logout_reason');
+  if(logoutReason){
+    sessionStorage.removeItem('logout_reason');
+    localStorage.removeItem('cc_token');
+    authToken = null;
+    if(logoutReason === 'expired'){
+      document.getElementById('loginErr').textContent = 'Session expired — please sign in again';
+      document.getElementById('loginErr').style.display = 'block';
+    }
+    await checkServer();
+    return; // show login screen, don't attempt auto-login
+  }
   await checkServer();
   // Try auto-login from saved token
   if(authToken && authToken !== 'offline'){
