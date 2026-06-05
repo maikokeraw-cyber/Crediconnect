@@ -1884,7 +1884,7 @@ async function saveRepay(){
   const notes=document.getElementById('fRN').value.trim();
   addRepayment({loanId,amount,date,notes}).then(async r=>{
     if(!repayments.find(rp=>rp.id===r.id)){repayments.push(r);const l2=loans.find(l=>l.id===loanId);if(l2&&getLoanBalance(loanId)<=0)l2.status='completed';saveAll();}
-    addAudit('RECORD_REPAYMENT','Repayment',r.id,'$'+amount);
+    addAudit('RECORD_REPAYMENT','Repayment',r.id, `${c?c.name+' — ':''}$${fmt(amount)}`);
     // Record fine as income via admin_fee_payments (not expenses)
     if(fine>0 && isDefaulted){
       const c=clients.find(c=>c.id===loan.clientId);
@@ -2325,15 +2325,81 @@ function deleteUser(id){
 async function renderAudit(){
   if(!can('admin')){document.getElementById('audContent').innerHTML=permDenied('Audit Log is for Administrators only.');return;}
   let log = auditLog;
-  if(USE_DB){ try{ log=await apiFetch('GET','/api/audit'); }catch(e){} }
+  let allUsers = userList;
+  if(USE_DB){
+    try{
+      [log, allUsers] = await Promise.all([
+        apiFetch('GET','/api/audit'),
+        apiFetch('GET','/api/users').catch(()=>userList)
+      ]);
+    }catch(e){}
+  }
 
-  // Action badge colours + labels for Credinova actions
+  // Helper: resolve UUID-style loan ID to "ClientName — $amount"
+  const loanDesc = (loanId) => {
+    const l=loans.find(l=>l.id===loanId);
+    const c=l?clients.find(c=>c.id===l.clientId):null;
+    return c?`${c.name} — $${fmt(l.amount)}`:null;
+  };
+
+  // UUID regex — detects raw IDs in detail strings
+  const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+
+  // Resolve detail — replace UUIDs with human names where possible
+  const resolveDetail = (e) => {
+    let detail = e.detail||'';
+
+    // For repayments: "$12 for loan <uuid>" → "John Banda — $12"
+    if((e.action==='RECORD_REPAYMENT'||e.action==='EDIT_REPAYMENT'||e.action==='DELETE_REPAYMENT') && !detail){
+      const d = loanDesc(e.entityId); return d?`${d}`:detail;
+    }
+    if(e.action==='RECORD_REPAYMENT' && detail){
+      // Replace any loan UUID in the detail with client name
+      detail = detail.replace(uuidRe, (id)=>{
+        const d=loanDesc(id); return d?d:id;
+      });
+      return detail;
+    }
+
+    // For disburse loan old entries with UUID: replace UUID with client name
+    if(e.action==='DISBURSE_LOAN'||e.action==='ADD_LOAN'){
+      if(!detail){
+        const d=loanDesc(e.entityId); return d||`Loan …${(e.entityId||'').slice(-8)}`;
+      }
+      detail = detail.replace(uuidRe,(id)=>{
+        const c=clients.find(c=>c.id===id); if(c) return c.name;
+        const d=loanDesc(id); return d||id;
+      });
+      return detail;
+    }
+
+    // For delete client — if no detail, look up client
+    if(e.action==='DELETE_CLIENT'&&!detail){
+      const c=clients.find(c=>c.id===e.entityId);
+      return c?`Deleted: ${c.name}`:`Client …${(e.entityId||'').slice(-8)}`;
+    }
+    // For delete/edit loan — if no detail or has UUID
+    if((e.action==='DELETE_LOAN'||e.action==='EDIT_LOAN')&&(!detail||uuidRe.test(detail))){
+      const d=loanDesc(e.entityId);
+      if(!detail) return d||`Loan …${(e.entityId||'').slice(-8)}`;
+      return detail.replace(uuidRe,(id)=>{ const dd=loanDesc(id); return dd||id; });
+    }
+
+    // Replace any remaining UUIDs generically
+    return detail.replace(uuidRe,(id)=>{
+      const c=clients.find(c=>c.id===id); if(c) return c.name;
+      const d=loanDesc(id); return d||`…${id.slice(-8)}`;
+    });
+  };
+
+  // Action badge colours + labels
   const actionMeta={
     'LOGIN':            {color:'#27c97a',bg:'rgba(39,201,122,0.12)',  label:'LOGIN'},
     'ADD_CLIENT':       {color:'#4a8df5',bg:'rgba(74,141,245,0.12)',  label:'ADD CLIENT'},
     'EDIT_CLIENT':      {color:'#4a8df5',bg:'rgba(74,141,245,0.12)',  label:'EDIT CLIENT'},
     'DELETE_CLIENT':    {color:'#e85454',bg:'rgba(232,84,84,0.12)',   label:'DELETE CLIENT'},
     'ADD_LOAN':         {color:'#e8b84b',bg:'rgba(232,184,75,0.12)',  label:'DISBURSE LOAN'},
+    'DISBURSE_LOAN':    {color:'#e8b84b',bg:'rgba(232,184,75,0.12)',  label:'DISBURSE LOAN'},
     'EDIT_LOAN':        {color:'#e8b84b',bg:'rgba(232,184,75,0.12)',  label:'EDIT LOAN'},
     'DELETE_LOAN':      {color:'#e85454',bg:'rgba(232,84,84,0.12)',   label:'DELETE LOAN'},
     'RECORD_REPAYMENT': {color:'#27c97a',bg:'rgba(39,201,122,0.12)', label:'REPAYMENT'},
@@ -2350,33 +2416,15 @@ async function renderAudit(){
     'CREATE_BRANCH':    {color:'#06b6d4',bg:'rgba(6,182,212,0.12)',  label:'NEW BRANCH'},
   };
 
-  // Build filter UI then render table
   const actionOptions = ['All Actions',...new Set((log||[]).map(e=>e.action).filter(Boolean))];
 
   const renderTable = (filtered) => {
     if(!filtered.length) return `<tr><td colspan="4" style="padding:30px;text-align:center;color:var(--text3)">No entries match the selected filters</td></tr>`;
     return filtered.map(e=>{
       const meta = actionMeta[e.action]||{color:'var(--blue)',bg:'rgba(74,141,245,0.12)',label:e.action.replace(/_/g,' ')};
-      // Resolve full name from users list if available
-      const userObj = users.find(u=>u.username===e.username)||userList.find(u=>u.username===e.username);
+      const userObj = allUsers.find(u=>u.username===e.username);
       const fullName = userObj?.fullName || e.username || 'System';
-      // Detail fallback for deletions
-      let detail = e.detail||'';
-      if(!detail && e.action==='DELETE_CLIENT'){
-        const c=clients.find(c=>c.id===e.entityId);
-        detail = c?`Deleted: ${c.name}`:`Client …${(e.entityId||'').slice(-8)}`;
-      }
-      if(!detail && e.action==='DELETE_LOAN'){
-        const l=loans.find(l=>l.id===e.entityId);
-        const c=l?clients.find(c=>c.id===l.clientId):null;
-        detail = c?`${c.name} — $${fmt(l.amount)}`:`Loan …${(e.entityId||'').slice(-8)}`;
-      }
-      if(!detail && e.action==='DISBURSE_LOAN'){
-        const l=loans.find(l=>l.id===e.entityId);
-        const c=l?clients.find(c=>c.id===l.clientId):null;
-        detail = c?`${c.name} — $${fmt(l.amount)}`:`Loan …${(e.entityId||'').slice(-8)}`;
-      }
-      if(!detail && e.entityId) detail = `ID: …${e.entityId.slice(-8)}`;
+      const detail = resolveDetail(e);
       return `<tr style="border-bottom:1px solid var(--border)">
         <td style="padding:10px 14px;color:var(--text2);font-size:12px;white-space:nowrap">${fmtDT(e.createdAt)}</td>
         <td style="padding:10px 14px;font-size:12.5px;font-weight:500">${fullName}</td>
@@ -2396,8 +2444,8 @@ async function renderAudit(){
           <select id="auditActionFilter" onchange="applyAuditFilters()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px">
             ${actionOptions.map(a=>`<option value="${a==='All Actions'?'':a}">${a==='All Actions'?'All Actions':actionMeta[a]?.label||a.replace(/_/g,' ')}</option>`).join('')}
           </select>
-          <input id="auditDateFrom" type="date" onchange="applyAuditFilters()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px" placeholder="From">
-          <input id="auditDateTo" type="date" onchange="applyAuditFilters()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px" placeholder="To">
+          <input id="auditDateFrom" type="date" onchange="applyAuditFilters()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px">
+          <input id="auditDateTo" type="date" onchange="applyAuditFilters()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px">
           <button class="btn btn-ghost btn-sm" onclick="document.getElementById('auditActionFilter').value='';document.getElementById('auditDateFrom').value='';document.getElementById('auditDateTo').value='';applyAuditFilters()">Clear</button>
         </div>
       </div>
@@ -2414,7 +2462,6 @@ async function renderAudit(){
       </div>
     </div>`;
 
-  // Store log for filtering
   window._auditLog = log||[];
   window._auditRenderTable = renderTable;
 }
