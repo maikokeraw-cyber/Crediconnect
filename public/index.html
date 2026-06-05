@@ -2046,6 +2046,9 @@ function renderReports(){
   if(!can('admin')){document.getElementById('repContent').innerHTML=permDenied('Reports are for Administrators only.');return;}
   const td=loans.reduce((s,l)=>s+l.amount,0),ti=loans.reduce((s,l)=>s+(l.amount*l.interestRate/100),0);
   const tc=repayments.reduce((s,r)=>s+r.amount,0),al=loans.filter(l=>getLoanStatus(l)==='active');
+  // Loan book = outstanding balance of ALL non-completed loans (active + defaulted)
+  const loanBookLoans=loans.filter(l=>getLoanStatus(l)!=='completed');
+  const loanBook=loanBookLoans.reduce((s,l)=>s+getLoanBalance(l.id),0);
   const to=al.reduce((s,l)=>s+getLoanBalance(l.id),0);
   // True PAR30: outstanding balance of loans where a payment is 30+ days overdue
   // Numerator = sum of balances of loans with at least one payment 30+ days late
@@ -2114,7 +2117,7 @@ function renderReports(){
       </div>
     </div>
     <div class="stats-grid">
-      <div class="stat-card gold"><span class="stat-icon">📊</span><div class="stat-label">Loan Book</div><div class="stat-value">$${fmt(td)}</div><div class="stat-sub">${loans.length} loans</div></div>
+      <div class="stat-card gold"><span class="stat-icon">📊</span><div class="stat-label">Loan Book</div><div class="stat-value">$${fmt(loanBook)}</div><div class="stat-sub">${loanBookLoans.length} active loans</div></div>
       <div class="stat-card green"><span class="stat-icon">💵</span><div class="stat-label">Interest Accrued</div><div class="stat-value">$${fmt(ti)}</div><div class="stat-sub">Total interest</div></div>
       <div class="stat-card blue"><span class="stat-icon">📈</span><div class="stat-label">Collection Rate</div><div class="stat-value">${td>0?(tc/(td+ti)*100).toFixed(1):0}%</div><div class="stat-sub">Of total owed</div></div>
       <div class="stat-card ${par<=5?'green':par<=10?'amber':'red'}"><span class="stat-icon">⚖️</span><div class="stat-label">PAR30</div><div class="stat-value">${par}%</div><div class="stat-sub">${par30Loans.length} loan${par30Loans.length!==1?'s':''} · ${par<=5?'✅ Healthy':par<=10?'⚠️ Watch':'🚨 Critical'}</div></div>
