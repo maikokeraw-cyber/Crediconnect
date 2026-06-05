@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Credinova v4.3 — Financial Solutions</title>
+<title>Credinova v4.4 — Financial Solutions</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
@@ -236,7 +236,7 @@ input::placeholder{color:var(--text3)}
   </div>
   <div id="appLayout">
     <nav id="sidebar">
-      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v4.3</div></div>
+      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v4.4</div></div>
       <div class="nav">
         <div class="nav-section">Overview</div>
         <div class="nav-item active" id="nav-dashboard" onclick="navigate('dashboard')" class="nav-item-admin-only"><span class="icon">📊</span>Dashboard</div>
@@ -258,7 +258,7 @@ input::placeholder{color:var(--text3)}
         <div class="nav-item" id="nav-profile" onclick="navigate('profile')"><span class="icon">⚙️</span>My Profile</div>
       </div>
       <div style="padding:6px 14px 2px;text-align:right">
-        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:0.5px">v4.3</span>
+        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:0.5px">v4.4</span>
       </div>
       <div class="sidebar-user">
         <div class="sidebar-avatar" id="sbAvatar">?</div>
@@ -873,7 +873,7 @@ function updateStorageInfo(){
     ? `<span style="color:var(--green)">● Supabase PostgreSQL</span>`
     : `<span style="color:var(--amber)">● localStorage (offline)</span>`;
   const bLabel=isSuperAdmin()?(activeBranch?`Branch:${branches.find(b=>b.id===activeBranch)?.name||activeBranch.slice(-4)}`:'All'):(currentUser?.branchId?`Branch:${branches.find(b=>b.id===currentUser.branchId)?.name||'ID:'+currentUser.branchId.slice(-4)}`:'⚠️ No Branch');
-document.getElementById('storageInfo').innerHTML=`v4.3 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
+document.getElementById('storageInfo').innerHTML=`v4.4 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
 }
 
 // ================================================================
@@ -2325,32 +2325,106 @@ async function renderAudit(){
   if(!can('admin')){document.getElementById('audContent').innerHTML=permDenied('Audit Log is for Administrators only.');return;}
   let log = auditLog;
   if(USE_DB){ try{ log=await apiFetch('GET','/api/audit'); }catch(e){} }
-  const colors={LOGIN:'var(--green)',LOGOUT:'var(--text3)',ADD_CLIENT:'var(--blue)',DELETE_CLIENT:'var(--red)',DISBURSE_LOAN:'var(--gold2)',DELETE_LOAN:'var(--red)',RECORD_REPAYMENT:'var(--green)',DELETE_REPAYMENT:'var(--red)',ADD_EXPENSE:'var(--amber)',DELETE_EXPENSE:'var(--red)',CREATE_USER:'var(--purple)',UPDATE_USER:'var(--amber)',DELETE_USER:'var(--red)',CHANGE_PASSWORD:'var(--amber)'};;
+
+  // Action badge colours + labels for Credinova actions
+  const actionMeta={
+    'LOGIN':            {color:'#27c97a',bg:'rgba(39,201,122,0.12)',  label:'LOGIN'},
+    'ADD_CLIENT':       {color:'#4a8df5',bg:'rgba(74,141,245,0.12)',  label:'ADD CLIENT'},
+    'EDIT_CLIENT':      {color:'#4a8df5',bg:'rgba(74,141,245,0.12)',  label:'EDIT CLIENT'},
+    'DELETE_CLIENT':    {color:'#e85454',bg:'rgba(232,84,84,0.12)',   label:'DELETE CLIENT'},
+    'ADD_LOAN':         {color:'#e8b84b',bg:'rgba(232,184,75,0.12)',  label:'DISBURSE LOAN'},
+    'EDIT_LOAN':        {color:'#e8b84b',bg:'rgba(232,184,75,0.12)',  label:'EDIT LOAN'},
+    'DELETE_LOAN':      {color:'#e85454',bg:'rgba(232,84,84,0.12)',   label:'DELETE LOAN'},
+    'RECORD_REPAYMENT': {color:'#27c97a',bg:'rgba(39,201,122,0.12)', label:'REPAYMENT'},
+    'EDIT_REPAYMENT':   {color:'#27c97a',bg:'rgba(39,201,122,0.12)', label:'EDIT REPAYMENT'},
+    'DELETE_REPAYMENT': {color:'#e85454',bg:'rgba(232,84,84,0.12)',  label:'DELETE REPAYMENT'},
+    'RECORD_FINE':      {color:'#f97316',bg:'rgba(249,115,22,0.12)', label:'FINE'},
+    'ADD_EXPENSE':      {color:'#f0a832',bg:'rgba(240,168,50,0.12)', label:'ADD EXPENSE'},
+    'DELETE_EXPENSE':   {color:'#e85454',bg:'rgba(232,84,84,0.12)',  label:'DELETE EXPENSE'},
+    'CREATE_USER':      {color:'#a855f7',bg:'rgba(168,85,247,0.12)', label:'CREATE USER'},
+    'UPDATE_USER':      {color:'#a855f7',bg:'rgba(168,85,247,0.12)', label:'EDIT USER'},
+    'DELETE_USER':      {color:'#e85454',bg:'rgba(232,84,84,0.12)',  label:'DELETE USER'},
+    'CHANGE_PASSWORD':  {color:'#f0a832',bg:'rgba(240,168,50,0.12)', label:'CHANGE PASSWORD'},
+    'TRANSFER_CLIENT':  {color:'#06b6d4',bg:'rgba(6,182,212,0.12)',  label:'TRANSFER CLIENT'},
+    'CREATE_BRANCH':    {color:'#06b6d4',bg:'rgba(6,182,212,0.12)',  label:'NEW BRANCH'},
+  };
+
+  // Build filter UI then render table
+  const actionOptions = ['All Actions',...new Set((log||[]).map(e=>e.action).filter(Boolean))];
+
+  const renderTable = (filtered) => {
+    if(!filtered.length) return `<tr><td colspan="4" style="padding:30px;text-align:center;color:var(--text3)">No entries match the selected filters</td></tr>`;
+    return filtered.map(e=>{
+      const meta = actionMeta[e.action]||{color:'var(--blue)',bg:'rgba(74,141,245,0.12)',label:e.action.replace(/_/g,' ')};
+      // Resolve full name from users list if available
+      const userObj = users.find(u=>u.username===e.username)||userList.find(u=>u.username===e.username);
+      const fullName = userObj?.fullName || e.username || 'System';
+      // Detail fallback for deletions
+      let detail = e.detail||'';
+      if(!detail && e.action==='DELETE_CLIENT'){
+        const c=clients.find(c=>c.id===e.entityId);
+        detail = c?`Deleted: ${c.name}`:`Client …${(e.entityId||'').slice(-8)}`;
+      }
+      if(!detail && e.action==='DELETE_LOAN'){
+        const l=loans.find(l=>l.id===e.entityId);
+        const c=l?clients.find(c=>c.id===l.clientId):null;
+        detail = c?`${c.name} — $${fmt(l.amount)}`:`Loan …${(e.entityId||'').slice(-8)}`;
+      }
+      if(!detail && e.entityId) detail = `ID: …${e.entityId.slice(-8)}`;
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:10px 14px;color:var(--text2);font-size:12px;white-space:nowrap">${fmtDT(e.createdAt)}</td>
+        <td style="padding:10px 14px;font-size:12.5px;font-weight:500">${fullName}</td>
+        <td style="padding:10px 14px">
+          <span style="font-size:10px;font-weight:700;letter-spacing:0.5px;padding:3px 9px;border-radius:8px;white-space:nowrap;color:${meta.color};background:${meta.bg}">${meta.label}</span>
+        </td>
+        <td style="padding:10px 14px;font-size:12px;color:var(--text2)">${detail||'—'}</td>
+      </tr>`;
+    }).join('');
+  };
+
   document.getElementById('audContent').innerHTML=`
-    <div class="card"><div class="card-header"><span class="card-title">Activity Log (last 200 entries)</span>${!USE_DB?`<button class="btn btn-danger btn-sm" onclick="clearAudit()">Clear Log</button>`:''}</div>
-    <div class="card-body" style="max-height:600px;overflow-y:auto">
-      ${(log||[]).slice(0,200).map(e=>{
-        // Build display label — always show something useful
-        const detailStr = e.detail||'';
-        // For deletions with no detail, try to find the name from current data
-        let displayDetail = detailStr;
-        if(!displayDetail && e.action==='DELETE_CLIENT'){
-          const c=clients.find(c=>c.id===e.entityId);
-          displayDetail = c ? `Deleted: ${c.name}` : `Client ID: ${(e.entityId||'').slice(-8)}`;
-        }
-        if(!displayDetail && e.action==='DELETE_LOAN'){
-          const l=loans.find(l=>l.id===e.entityId);
-          const c=l?clients.find(c=>c.id===l.clientId):null;
-          displayDetail = c ? `Loan for ${c.name} $${fmt(l.amount)}` : `Loan ID: ${(e.entityId||'').slice(-8)}`;
-        }
-        if(!displayDetail && e.entityId) displayDetail = `ID: ${e.entityId.slice(-8)}`;
-        return `<div class="audit-row"><div class="audit-dot" style="background:${colors[e.action]||'var(--blue)'}"></div>
-        <div><div class="audit-action">${e.action.replace(/_/g,' ')}</div>
-        <div class="audit-meta">by <strong style="color:var(--text2)">@${e.username||'system'}</strong>${displayDetail?' · '+displayDetail:''} · ${fmtDT(e.createdAt)}</div>
-        </div></div>`;
-      }).join('')||'<div style="color:var(--text3);text-align:center;padding:40px">No activity yet</div>'}
-    </div></div>`;
+    <div class="card">
+      <div class="card-header" style="flex-wrap:wrap;gap:10px">
+        <span class="card-title">Audit Log</span>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="auditActionFilter" onchange="applyAuditFilters()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px">
+            ${actionOptions.map(a=>`<option value="${a==='All Actions'?'':a}">${a==='All Actions'?'All Actions':actionMeta[a]?.label||a.replace(/_/g,' ')}</option>`).join('')}
+          </select>
+          <input id="auditDateFrom" type="date" onchange="applyAuditFilters()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px" placeholder="From">
+          <input id="auditDateTo" type="date" onchange="applyAuditFilters()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 10px;font-size:12px" placeholder="To">
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('auditActionFilter').value='';document.getElementById('auditDateFrom').value='';document.getElementById('auditDateTo').value='';applyAuditFilters()">Clear</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface)">
+            <th style="padding:10px 14px;text-align:left;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;white-space:nowrap">Date &amp; Time</th>
+            <th style="padding:10px 14px;text-align:left;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">User</th>
+            <th style="padding:10px 14px;text-align:left;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Action</th>
+            <th style="padding:10px 14px;text-align:left;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Description</th>
+          </tr></thead>
+          <tbody id="auditTableBody">${renderTable((log||[]).slice(0,300))}</tbody>
+        </table>
+      </div>
+    </div>`;
+
+  // Store log for filtering
+  window._auditLog = log||[];
+  window._auditRenderTable = renderTable;
 }
+
+function applyAuditFilters(){
+  const action = document.getElementById('auditActionFilter')?.value||'';
+  const from   = document.getElementById('auditDateFrom')?.value||'';
+  const to     = document.getElementById('auditDateTo')?.value||'';
+  let filtered = (window._auditLog||[]);
+  if(action) filtered = filtered.filter(e=>e.action===action);
+  if(from)   filtered = filtered.filter(e=>e.createdAt&&e.createdAt.slice(0,10)>=from);
+  if(to)     filtered = filtered.filter(e=>e.createdAt&&e.createdAt.slice(0,10)<=to);
+  const tbody = document.getElementById('auditTableBody');
+  if(tbody && window._auditRenderTable) tbody.innerHTML = window._auditRenderTable(filtered.slice(0,300));
+}
+
 function clearAudit(){if(!confirm('Clear all audit log entries?'))return;auditLog=[];lsSet(K.audit,auditLog);renderAudit();toast('Audit log cleared','info');}
 
 // ================================================================
