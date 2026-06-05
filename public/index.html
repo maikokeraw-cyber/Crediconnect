@@ -1470,7 +1470,8 @@ function saveLoan(){
       }
       const loan=loans.find(l=>l.id===r.id); if(loan){loan.adminFeesStatus=adminFees>0?'paid':'none';} saveAll();
     }
-    addAudit('DISBURSE_LOAN','Loan',r.id,'$'+fmt(amount)+' loan | $'+fmt(adminFees)+' admin fee retained | $'+fmt(cashToCustomer)+' to customer');
+    const clientForAudit = clients.find(c=>c.id===clientId);
+    addAudit('DISBURSE_LOAN','Loan',r.id,`${clientForAudit?clientForAudit.name+' — ':''}$${fmt(amount)} | Admin fee: $${fmt(adminFees)} | Cash to client: $${fmt(cashToCustomer)}`);
     CM('mAddLoan');renderLoans();updateStorageInfo();
     toast('Loan disbursed — $'+fmt(cashToCustomer)+' to customer'+(adminFees>0?', $'+fmt(adminFees)+' admin fee retained in business':''),'success');
   }).catch(e=>toast('Error: '+e.message,'error'));
@@ -2366,6 +2367,11 @@ async function renderAudit(){
         detail = c?`Deleted: ${c.name}`:`Client …${(e.entityId||'').slice(-8)}`;
       }
       if(!detail && e.action==='DELETE_LOAN'){
+        const l=loans.find(l=>l.id===e.entityId);
+        const c=l?clients.find(c=>c.id===l.clientId):null;
+        detail = c?`${c.name} — $${fmt(l.amount)}`:`Loan …${(e.entityId||'').slice(-8)}`;
+      }
+      if(!detail && e.action==='DISBURSE_LOAN'){
         const l=loans.find(l=>l.id===e.entityId);
         const c=l?clients.find(c=>c.id===l.clientId):null;
         detail = c?`${c.name} — $${fmt(l.amount)}`:`Loan …${(e.entityId||'').slice(-8)}`;
