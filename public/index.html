@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Credinova v4.4 — Financial Solutions</title>
+<title>Credinova v4.5 — Financial Solutions</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
@@ -236,7 +236,7 @@ input::placeholder{color:var(--text3)}
   </div>
   <div id="appLayout">
     <nav id="sidebar">
-      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v4.4</div></div>
+      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v4.5</div></div>
       <div class="nav">
         <div class="nav-section">Overview</div>
         <div class="nav-item active" id="nav-dashboard" onclick="navigate('dashboard')" class="nav-item-admin-only"><span class="icon">📊</span>Dashboard</div>
@@ -258,7 +258,7 @@ input::placeholder{color:var(--text3)}
         <div class="nav-item" id="nav-profile" onclick="navigate('profile')"><span class="icon">⚙️</span>My Profile</div>
       </div>
       <div style="padding:6px 14px 2px;text-align:right">
-        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:0.5px">v4.4</span>
+        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:0.5px">v4.5</span>
       </div>
       <div class="sidebar-user">
         <div class="sidebar-avatar" id="sbAvatar">?</div>
@@ -873,7 +873,7 @@ function updateStorageInfo(){
     ? `<span style="color:var(--green)">● Supabase PostgreSQL</span>`
     : `<span style="color:var(--amber)">● localStorage (offline)</span>`;
   const bLabel=isSuperAdmin()?(activeBranch?`Branch:${branches.find(b=>b.id===activeBranch)?.name||activeBranch.slice(-4)}`:'All'):(currentUser?.branchId?`Branch:${branches.find(b=>b.id===currentUser.branchId)?.name||'ID:'+currentUser.branchId.slice(-4)}`:'⚠️ No Branch');
-document.getElementById('storageInfo').innerHTML=`v4.4 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
+document.getElementById('storageInfo').innerHTML=`v4.5 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
 }
 
 // ================================================================
@@ -1549,6 +1549,62 @@ function periodicInterestForLoan(loan){
   return loan.amount * loan.interestRate / 100 / loan.term;
 }
 
+// ================================================================
+//  AUTO PENALTY — 5% of installment, applied once per late period
+// ================================================================
+const PENALTY_RATE = 0.05; // 5% — change here to adjust globally
+
+async function applyAutoPenalties(loan){
+  // Only run for loans that are overdue/defaulted
+  if(getLoanStatus(loan) === 'completed') return 0;
+  if(!isLoanOverdue(loan)) return 0;
+
+  const todayStr = todayZW();
+  const amort    = buildAmortisation(loan);
+  const totalPaid = getLoanPaid(loan.id);
+  const periodicPay = getLoanTotal(loan) / loan.term;
+  const c = clients.find(c=>c.id===loan.clientId);
+
+  let penaltiesApplied = 0;
+  let runningDue = 0;
+
+  for(let i = 0; i < amort.length; i++){
+    const row = amort[i];
+    if(row.dueDate >= todayStr) break; // not past due yet
+
+    runningDue += periodicPay;
+    const isUnpaid = totalPaid < runningDue - 0.005;
+
+    if(isUnpaid){
+      // Check if penalty already recorded for this period
+      const penaltyKey = `Auto penalty period ${row.month} loan ${loan.id.slice(-6)}`;
+      const alreadyCharged = adminFeePayments.some(af=>
+        af.loanId === loan.id && (af.notes||'').includes(`Auto penalty period ${row.month}`)
+      );
+      if(!alreadyCharged){
+        const penaltyAmt = Math.round(periodicPay * PENALTY_RATE * 100) / 100;
+        await addAdminFeePayment({
+          loanId: loan.id,
+          amount: penaltyAmt,
+          date:   row.dueDate,
+          notes:  `Auto penalty period ${row.month} — 5% of $${fmt(periodicPay)} (${c?c.name:''})`
+        });
+        // Refresh local adminFeePayments
+        try{
+          const fresh = await apiFetch('GET','/api/admin-fees'+branchParam());
+          adminFeePayments = fresh.map(r=>({
+            id:r.id, loanId:r.loanId||r.loan_id, amount:Number(r.amount),
+            date:(r.date||'').slice(0,10), notes:r.notes||'',
+            addedBy:r.addedBy||'', clientName:r.clientName||'', loanAmount:Number(r.loanAmount||0)
+          }));
+        }catch(e){}
+        penaltiesApplied++;
+      }
+    }
+  }
+  return penaltiesApplied;
+}
+
 async function openLoanDetail(id){
   const loan=loans.find(l=>l.id===id);if(!loan)return;
 
@@ -1564,6 +1620,19 @@ async function openLoanDetail(id){
       loans      = freshLoans.map(normaliseLoan);
       saveAll();
     }catch(e){ console.warn('Could not refresh loan data:', e.message); }
+  }
+
+  // Apply auto penalties for overdue periods (5% per missed installment)
+  const loanForPenalty = loans.find(l=>l.id===id)||loan;
+  if(USE_DB && isLoanOverdue(loanForPenalty)){
+    try{
+      const freshAF = await apiFetch('GET','/api/admin-fees'+branchParam()).catch(()=>[]);
+      adminFeePayments = freshAF.map(r=>({id:r.id,loanId:r.loanId||r.loan_id,amount:Number(r.amount),date:(r.date||'').slice(0,10),notes:r.notes||'',addedBy:r.addedBy||'',clientName:r.clientName||'',loanAmount:Number(r.loanAmount||0)}));
+    }catch(e){}
+    const newPenalties = await applyAutoPenalties(loanForPenalty).catch(()=>0);
+    if(newPenalties>0){
+      toast(`${newPenalties} penalty fee${newPenalties>1?'s':''} applied (5% per missed installment)`,'info');
+    }
   }
 
   // Re-fetch loan after possible update
@@ -1792,7 +1861,7 @@ function renderRepayments(){
   document.getElementById('repaySummary').innerHTML=`<div class="sum-item"><div class="sum-label">Repayments</div><div class="sum-val" style="color:var(--green)">$${fmt(tp)}</div></div><div class="sum-item"><div class="sum-label">Admin Fees Retained</div><div class="sum-val" style="color:var(--gold2)">$${fmt(afPaidTotal)}</div></div><div class="sum-item"><div class="sum-label">Transactions</div><div class="sum-val">${data.length+afPaid.length}</div></div><div class="sum-item"><div class="sum-label">Last Payment</div><div class="sum-val" style="font-size:14px">${data[0]?fmtDate(data[0].date):'--'}</div></div>`;
   const tb=document.getElementById('repayTbody');
   const pendingRows=[]; // Admin fees are always retained at disbursement — no pending rows
-  const afPaidRows=afPaid.sort((a,b)=>b.date.localeCompare(a.date)).map(a=>{const lo=loans.find(l=>l.id===a.loanId),c=lo?clients.find(c=>c.id===lo.clientId):null;const av=c?`<div class="name-cell"><div class="avatar" style="background:${avatarColor(c.name)};width:24px;height:24px;font-size:10px">${initials(c.name)}</div>${c.name}</div>`:'--';const isFine=(a.notes||'').toLowerCase().includes('fine');const typeLabel=isFine?`<span style="background:rgba(249,115,22,0.15);color:#f97316;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">FINE</span>`:`<span style="background:var(--gold-dim);color:var(--gold2);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Admin Fee</span>`;const amtColor=isFine?'#f97316':'var(--gold2)';return `<tr style="background:rgba(201,149,42,0.05)"><td class="primary">${fmtDate(a.date)}</td><td>${av}</td><td style="font-family:'DM Mono',monospace;font-size:11px">...${a.loanId.slice(-6)}</td><td style="color:${amtColor};font-weight:600">+$${fmt(a.amount)}</td><td>${typeLabel}</td><td style="color:var(--text2);font-size:12px">${a.notes||'--'}</td><td onclick="event.stopPropagation()">${can('delete')?`<button class="btn btn-danger btn-sm" onclick="handleDeleteAdminFee('${a.id}')">Delete</button>`:''}</td></tr>`;});
+  const afPaidRows=afPaid.sort((a,b)=>b.date.localeCompare(a.date)).map(a=>{const lo=loans.find(l=>l.id===a.loanId),c=lo?clients.find(c=>c.id===lo.clientId):null;const av=c?`<div class="name-cell"><div class="avatar" style="background:${avatarColor(c.name)};width:24px;height:24px;font-size:10px">${initials(c.name)}</div>${c.name}</div>`:'--';const isFine=(a.notes||'').toLowerCase().includes('fine');const isPenalty=(a.notes||'').toLowerCase().includes('auto penalty');const typeLabel=isPenalty?`<span style="background:rgba(232,84,84,0.15);color:var(--red);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">PENALTY</span>`:isFine?`<span style="background:rgba(249,115,22,0.15);color:#f97316;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">FINE</span>`:`<span style="background:var(--gold-dim);color:var(--gold2);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Admin Fee</span>`;const amtColor=isPenalty?'var(--red)':isFine?'#f97316':'var(--gold2)';return `<tr style="background:rgba(201,149,42,0.05)"><td class="primary">${fmtDate(a.date)}</td><td>${av}</td><td style="font-family:'DM Mono',monospace;font-size:11px">...${a.loanId.slice(-6)}</td><td style="color:${amtColor};font-weight:600">+$${fmt(a.amount)}</td><td>${typeLabel}</td><td style="color:var(--text2);font-size:12px">${a.notes||'--'}</td><td onclick="event.stopPropagation()">${can('delete')?`<button class="btn btn-danger btn-sm" onclick="handleDeleteAdminFee('${a.id}')">Delete</button>`:''}</td></tr>`;});
   if(!data.length&&!pendingRows.length&&!afPaidRows.length){tb.innerHTML=`<tr><td colspan="7"><div class="empty-state"><div class="emoji">&#x1F4B3;</div><p>No payments found</p></div></td></tr>`;return;}
   tb.innerHTML=pendingRows.join('')+afPaidRows.join('')+data.map(r=>{
     const lo=loans.find(l=>l.id===r.loanId),c=lo?clients.find(c=>c.id===lo.clientId):null;
@@ -1884,7 +1953,8 @@ async function saveRepay(){
   const notes=document.getElementById('fRN').value.trim();
   addRepayment({loanId,amount,date,notes}).then(async r=>{
     if(!repayments.find(rp=>rp.id===r.id)){repayments.push(r);const l2=loans.find(l=>l.id===loanId);if(l2&&getLoanBalance(loanId)<=0)l2.status='completed';saveAll();}
-    addAudit('RECORD_REPAYMENT','Repayment',r.id, `${c?c.name+' — ':''}$${fmt(amount)}`);
+    const repayClient = clients.find(cl=>cl.id===loan.clientId);
+    addAudit('RECORD_REPAYMENT','Repayment',r.id, `${repayClient?repayClient.name+' — ':''}$${fmt(amount)}`);
     // Record fine as income via admin_fee_payments (not expenses)
     if(fine>0 && isDefaulted){
       const c=clients.find(c=>c.id===loan.clientId);
