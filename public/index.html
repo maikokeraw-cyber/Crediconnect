@@ -1066,12 +1066,28 @@ function renderDuePayments(){
         <th>Balance</th>
         <th>Due Date</th>
         ${showDays?'<th>Days Overdue</th>':''}
+        ${showDays?'<th style="color:var(--red)">Penalty (5%)</th>':''}
         <th></th>
       </tr></thead>
       <tbody>${items.map(({loan:l,client:c,row,bal,daysOverdue,freqBadge})=>{
         const av=c?`<div class="name-cell"><div class="avatar" style="background:${avatarColor(c.name)};width:26px;height:26px;font-size:10px">${initials(c.name)}</div><span style="font-weight:500">${c.name}</span></div>`:'—';
         const phone=c?.phone?`<a href="tel:${c.phone}" style="color:var(--text);font-family:'DM Mono',monospace;font-size:12px;text-decoration:none">${c.phone}</a>`:'—';
         const daysStyle=daysOverdue>7?'color:var(--red);font-weight:700':daysOverdue>3?'color:var(--amber);font-weight:600':'color:var(--text2)';
+        // Penalty column — show charged penalty for this loan's current missed period
+        let penaltyCell = '';
+        if(showDays){
+          const periodicPay = getLoanTotal(l)/l.term;
+          const penaltyAmt  = Math.round(periodicPay * PENALTY_RATE * 100) / 100;
+          const amort       = buildAmortisation(l);
+          const pastDue     = amort.filter(r=>r.dueDate < tzd);
+          const currentMissed = pastDue[pastDue.length-1];
+          const alreadyCharged = currentMissed && adminFeePayments.some(af=>
+            af.loanId===l.id && (af.notes||'').includes(`Auto penalty period ${currentMissed.month}`)
+          );
+          penaltyCell = alreadyCharged
+            ? `<td style="font-family:'DM Mono',monospace;color:var(--red);font-weight:600">$${fmt(penaltyAmt)} ✓</td>`
+            : `<td style="font-family:'DM Mono',monospace;color:var(--amber)">$${fmt(penaltyAmt)} pending</td>`;
+        }
         return `<tr>
           <td class="primary">${av}</td>
           <td>${phone}</td>
@@ -1080,6 +1096,7 @@ function renderDuePayments(){
           <td style="font-family:'DM Mono',monospace;color:var(--red)">$${fmt(bal)}</td>
           <td style="color:var(--text2);white-space:nowrap">${fmtDate(row.dueDate)}</td>
           ${showDays?`<td style="${daysStyle}">${daysOverdue} day${daysOverdue!==1?'s':''}</td>`:''}
+          ${penaltyCell}
           <td style="white-space:nowrap">${can('write')?`<button class="btn btn-success btn-sm" onclick="openAddRepayForLoan('${l.id}')">+ Pay</button> `:''}
               <button class="btn btn-ghost btn-sm" onclick="openLoanDetail('${l.id}')">View</button></td>
         </tr>`;
