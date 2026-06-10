@@ -1028,6 +1028,25 @@ function renderDuePayments(){
   const tzd=todayZW(), tzTomorrow=tomorrowZW();
   const freq=document.getElementById('dueFreqFilter')?.value||'';
 
+  // Auto-apply penalties for all overdue loans when this page loads
+  if(USE_DB){
+    const overdueNow = loans.filter(l=>isLoanOverdue(l));
+    if(overdueNow.length){
+      Promise.all(overdueNow.map(l=>applyAutoPenalties(l).catch(()=>0)))
+        .then(results=>{
+          const total = results.reduce((s,n)=>s+n,0);
+          if(total>0){
+            // Refresh admin fees then re-render
+            apiFetch('GET','/api/admin-fees'+branchParam()).then(fresh=>{
+              adminFeePayments=fresh.map(r=>({id:r.id,loanId:r.loanId||r.loan_id,amount:Number(r.amount),date:(r.date||'').slice(0,10),notes:r.notes||'',addedBy:r.addedBy||'',clientName:r.clientName||'',loanAmount:Number(r.loanAmount||0)}));
+              toast(`${total} penalty fee${total>1?'s':''} applied automatically`,'info');
+              renderDuePayments(); // refresh table to show ✓
+            }).catch(()=>{});
+          }
+        });
+    }
+  }
+
   // Build due lists — filtered by frequency if selected
   const dueToday=[],dueTomorrow=[],overdueList=[];
   loans.forEach(l=>{
@@ -1086,7 +1105,7 @@ function renderDuePayments(){
           );
           penaltyCell = alreadyCharged
             ? `<td style="font-family:'DM Mono',monospace;color:var(--red);font-weight:600">$${fmt(penaltyAmt)} ✓</td>`
-            : `<td style="font-family:'DM Mono',monospace;color:var(--amber)">$${fmt(penaltyAmt)} pending</td>`;
+            : `<td style="font-family:'DM Mono',monospace;color:var(--text3)">$${fmt(penaltyAmt)}</td>`;
         }
         return `<tr>
           <td class="primary">${av}</td>
@@ -1632,17 +1651,7 @@ async function openLoanDetail(id){
 
   // Apply auto penalties for overdue periods (5% per missed installment)
   const loanForPenalty = loans.find(l=>l.id===id)||loan;
-  if(USE_DB && isLoanOverdue(loanForPenalty)){
-    try{
-      const freshAF = await apiFetch('GET','/api/admin-fees'+branchParam()).catch(()=>[]);
-      adminFeePayments = freshAF.map(r=>({id:r.id,loanId:r.loanId||r.loan_id,amount:Number(r.amount),date:(r.date||'').slice(0,10),notes:r.notes||'',addedBy:r.addedBy||'',clientName:r.clientName||'',loanAmount:Number(r.loanAmount||0)}));
-    }catch(e){}
-    const newPenalties = await applyAutoPenalties(loanForPenalty).catch(()=>0);
-    if(newPenalties>0){
-      toast(`${newPenalties} penalty fee${newPenalties>1?'s':''} applied (5% per missed installment)`,'info');
-    }
-  }
-
+  // Penalties are now applied automatically on the Due Payments page
   // Re-fetch loan after possible update
   const freshLoan=loans.find(l=>l.id===id)||loan;
   const c=clients.find(c=>c.id===freshLoan.clientId),tot=getLoanTotal(freshLoan),bal=getLoanBalance(id),paid=tot-bal,pct=Math.min(100,Math.round(paid/tot*100));
