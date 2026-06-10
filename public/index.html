@@ -1552,57 +1552,48 @@ function periodicInterestForLoan(loan){
 // ================================================================
 //  AUTO PENALTY — 5% of installment, applied once per late period
 // ================================================================
-const PENALTY_RATE = 0.05; // 5% — change here to adjust globally
+const PENALTY_RATE = 0.05; // 5% of installment — change here to adjust globally
 
 async function applyAutoPenalties(loan){
-  // Only run for loans that are overdue/defaulted
   if(getLoanStatus(loan) === 'completed') return 0;
-  if(!isLoanOverdue(loan)) return 0;
+  if(!isLoanOverdue(loan)) return 0; // client on good schedule — no fine
 
-  const todayStr = todayZW();
-  const amort    = buildAmortisation(loan);
-  const totalPaid = getLoanPaid(loan.id);
+  const todayStr    = todayZW();
+  const amort       = buildAmortisation(loan);
+  const totalPaid   = getLoanPaid(loan.id);
   const periodicPay = getLoanTotal(loan) / loan.term;
-  const c = clients.find(c=>c.id===loan.clientId);
+  const c           = clients.find(c=>c.id===loan.clientId);
 
-  let penaltiesApplied = 0;
-  let runningDue = 0;
+  // Only the MOST RECENT missed installment — not all historical
+  const pastDue = amort.filter(r => r.dueDate < todayStr);
+  if(!pastDue.length) return 0;
 
-  for(let i = 0; i < amort.length; i++){
-    const row = amort[i];
-    if(row.dueDate >= todayStr) break; // not past due yet
+  const currentMissed = pastDue[pastDue.length - 1]; // current overdue period
+  const amountDueNow  = pastDue.length * periodicPay;
 
-    runningDue += periodicPay;
-    const isUnpaid = totalPaid < runningDue - 0.005;
+  // If client has paid enough to cover current period — no fine
+  if(totalPaid >= amountDueNow - 0.005) return 0;
 
-    if(isUnpaid){
-      // Check if penalty already recorded for this period
-      const penaltyKey = `Auto penalty period ${row.month} loan ${loan.id.slice(-6)}`;
-      const alreadyCharged = adminFeePayments.some(af=>
-        af.loanId === loan.id && (af.notes||'').includes(`Auto penalty period ${row.month}`)
-      );
-      if(!alreadyCharged){
-        const penaltyAmt = Math.round(periodicPay * PENALTY_RATE * 100) / 100;
-        await addAdminFeePayment({
-          loanId: loan.id,
-          amount: penaltyAmt,
-          date:   row.dueDate,
-          notes:  `Auto penalty period ${row.month} — 5% of $${fmt(periodicPay)} (${c?c.name:''})`
-        });
-        // Refresh local adminFeePayments
-        try{
-          const fresh = await apiFetch('GET','/api/admin-fees'+branchParam());
-          adminFeePayments = fresh.map(r=>({
-            id:r.id, loanId:r.loanId||r.loan_id, amount:Number(r.amount),
-            date:(r.date||'').slice(0,10), notes:r.notes||'',
-            addedBy:r.addedBy||'', clientName:r.clientName||'', loanAmount:Number(r.loanAmount||0)
-          }));
-        }catch(e){}
-        penaltiesApplied++;
-      }
-    }
-  }
-  return penaltiesApplied;
+  // Already penalised for this period?
+  const alreadyCharged = adminFeePayments.some(af =>
+    af.loanId === loan.id &&
+    (af.notes||'').includes(`Auto penalty period ${currentMissed.month}`)
+  );
+  if(alreadyCharged) return 0;
+
+  // Apply once for the current missed period only
+  const penaltyAmt = Math.round(periodicPay * PENALTY_RATE * 100) / 100;
+  await addAdminFeePayment({
+    loanId: loan.id,
+    amount: penaltyAmt,
+    date:   currentMissed.dueDate,
+    notes:  `Auto penalty period ${currentMissed.month} — 5% of $${fmt(periodicPay)} (${c?c.name:''})`
+  });
+  try{
+    const fresh = await apiFetch('GET','/api/admin-fees'+branchParam());
+    adminFeePayments = fresh.map(r=>({id:r.id,loanId:r.loanId||r.loan_id,amount:Number(r.amount),date:(r.date||'').slice(0,10),notes:r.notes||'',addedBy:r.addedBy||'',clientName:r.clientName||'',loanAmount:Number(r.loanAmount||0)}));
+  }catch(e){}
+  return 1;
 }
 
 async function openLoanDetail(id){
@@ -1737,14 +1728,43 @@ async function openLoanDetail(id){
       </table>
     </div>
 
-    ${rps.length?`<div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--text3);font-weight:600;margin-bottom:8px">Payment History</div>
-    <table style="width:100%;font-size:12.5px;border-collapse:collapse"><thead><tr>
-      <th style="text-align:left;padding:8px 10px;background:var(--surface);color:var(--text3);font-size:10px">Date</th>
-      <th style="text-align:right;padding:8px 10px;background:var(--surface);color:var(--text3);font-size:10px">Amount</th>
-      <th style="text-align:left;padding:8px 10px;background:var(--surface);color:var(--text3);font-size:10px">Notes</th>
-    </tr></thead>
-    <tbody>${rps.map(r=>`<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 10px;color:var(--text2)">${fmtDate(r.date)}</td><td style="padding:8px 10px;color:var(--green);text-align:right;font-family:'DM Mono',monospace">+$${fmt(r.amount)}</td><td style="padding:8px 10px;color:var(--text3)">${r.notes||'—'}</td><td style="padding:8px 10px" onclick="event.stopPropagation()">${can('admin')?`<button class="btn btn-ghost btn-sm" onclick="openEditRepayment('${r.id}')">✏️</button>`:''}</td></tr>`).join('')}</tbody></table>`:
-    '<div style="text-align:center;padding:20px;color:var(--text3)">No payments recorded yet</div>'}`;
+    ${(()=>{
+      // Combine repayments + penalties/fines for this loan into one history
+      const loanPenalties = adminFeePayments.filter(a=>a.loanId===freshLoan.id);
+      const allEntries = [
+        ...rps.map(r=>({...r, _type:'repayment'})),
+        ...loanPenalties.map(a=>({...a, _type: (a.notes||'').toLowerCase().includes('auto penalty')?'penalty':(a.notes||'').toLowerCase().includes('fine')?'fine':'adminfee'}))
+      ].sort((a,b)=>b.date.localeCompare(a.date));
+      if(!allEntries.length) return '<div style="text-align:center;padding:20px;color:var(--text3)">No payments recorded yet</div>';
+      return `<div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--text3);font-weight:600;margin-bottom:8px">Payment History</div>
+      <table style="width:100%;font-size:12.5px;border-collapse:collapse"><thead><tr>
+        <th style="text-align:left;padding:8px 10px;background:var(--surface);color:var(--text3);font-size:10px">Date</th>
+        <th style="text-align:right;padding:8px 10px;background:var(--surface);color:var(--text3);font-size:10px">Amount</th>
+        <th style="padding:8px 10px;background:var(--surface);color:var(--text3);font-size:10px">Type</th>
+        <th style="text-align:left;padding:8px 10px;background:var(--surface);color:var(--text3);font-size:10px">Notes</th>
+        <th style="background:var(--surface)"></th>
+      </tr></thead><tbody>
+      ${allEntries.map(e=>{
+        const isPenalty=e._type==='penalty', isFine=e._type==='fine', isAF=e._type==='adminfee';
+        const typeBadge = isPenalty
+          ? `<span style="font-size:10px;background:rgba(232,84,84,0.15);color:var(--red);padding:1px 6px;border-radius:6px;font-weight:700">PENALTY</span>`
+          : isFine
+          ? `<span style="font-size:10px;background:rgba(249,115,22,0.15);color:#f97316;padding:1px 6px;border-radius:6px;font-weight:700">FINE</span>`
+          : isAF
+          ? `<span style="font-size:10px;background:var(--gold-dim);color:var(--gold2);padding:1px 6px;border-radius:6px;font-weight:600">ADMIN FEE</span>`
+          : '';
+        const amtColor = isPenalty?'var(--red)':isFine?'#f97316':isAF?'var(--gold2)':'var(--green)';
+        const editBtn  = e._type==='repayment'&&can('admin') ? `<button class="btn btn-ghost btn-sm" onclick="openEditRepayment('${e.id}')">✏️</button>` : '';
+        return `<tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:8px 10px;color:var(--text2)">${fmtDate(e.date)}</td>
+          <td style="padding:8px 10px;color:${amtColor};text-align:right;font-family:'DM Mono',monospace;font-weight:600">+$${fmt(e.amount)}</td>
+          <td style="padding:8px 10px">${typeBadge}</td>
+          <td style="padding:8px 10px;color:var(--text3)">${e.notes||'—'}</td>
+          <td style="padding:8px 10px" onclick="event.stopPropagation()">${editBtn}</td>
+        </tr>`;
+      }).join('')}
+      </tbody></table>`;
+    })()}`;
 
   document.getElementById('ldFooter').innerHTML=`
     ${can('delete')?`<button class="btn btn-danger btn-sm" onclick="deleteLoan('${freshLoan.id}')">Delete Loan</button>`:''}
