@@ -1052,17 +1052,27 @@ function renderDuePayments(){
   loans.forEach(l=>{
     const status=getLoanStatus(l);
     if(status==='completed') return;
-    if(freq && l.termFrequency!==freq) return; // frequency filter
+    if(freq && l.termFrequency!==freq) return;
     const c=clients.find(c=>c.id===l.clientId);
     const amort=buildAmortisation(l);
     const bal=getLoanBalance(l.id);
+    const paid=getLoanPaid(l.id);
+    const periodicPay=getLoanTotal(l)/l.term;
     const freqBadge=`<span style="font-size:9px;padding:1px 5px;border-radius:6px;font-weight:700;text-transform:uppercase;background:${l.termFrequency==='daily'?'rgba(74,141,245,0.15)':l.termFrequency==='weekly'?'rgba(39,201,122,0.15)':'rgba(240,168,50,0.15)'};color:${l.termFrequency==='daily'?'var(--blue)':l.termFrequency==='weekly'?'var(--green)':'var(--amber)'}">${l.termFrequency||'monthly'}</span>`;
-    // Today
+    // Today — only show if this period has NOT been covered by payments
     const todayRow=amort.find(r=>r.dueDate===tzd);
-    if(todayRow) dueToday.push({loan:l,client:c,row:todayRow,bal,status,freqBadge});
-    // Tomorrow
+    if(todayRow){
+      const amountDueForPeriod=todayRow.month*periodicPay;
+      if(paid < amountDueForPeriod-0.005) // not yet covered
+        dueToday.push({loan:l,client:c,row:todayRow,bal,status,freqBadge});
+    }
+    // Tomorrow — only show if not already paid ahead
     const tmrRow=amort.find(r=>r.dueDate===tzTomorrow);
-    if(tmrRow) dueTomorrow.push({loan:l,client:c,row:tmrRow,bal,status,freqBadge});
+    if(tmrRow){
+      const amountDueForTmr=tmrRow.month*periodicPay;
+      if(paid < amountDueForTmr-0.005)
+        dueTomorrow.push({loan:l,client:c,row:tmrRow,bal,status,freqBadge});
+    }
     // Overdue
     if(isLoanOverdue(l)){
       const lastDue=amort.filter(r=>r.dueDate<tzd).pop();
