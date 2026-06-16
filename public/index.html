@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Credinova v4.5 — Financial Solutions</title>
+<title>Credinova v4.6 — Financial Solutions</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
@@ -236,7 +236,7 @@ input::placeholder{color:var(--text3)}
   </div>
   <div id="appLayout">
     <nav id="sidebar">
-      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v4.5</div></div>
+      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v4.6</div></div>
       <div class="nav">
         <div class="nav-section">Overview</div>
         <div class="nav-item active" id="nav-dashboard" onclick="navigate('dashboard')" class="nav-item-admin-only"><span class="icon">📊</span>Dashboard</div>
@@ -258,7 +258,7 @@ input::placeholder{color:var(--text3)}
         <div class="nav-item" id="nav-profile" onclick="navigate('profile')"><span class="icon">⚙️</span>My Profile</div>
       </div>
       <div style="padding:6px 14px 2px;text-align:right">
-        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:0.5px">v4.5</span>
+        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:0.5px">v4.6</span>
       </div>
       <div class="sidebar-user">
         <div class="sidebar-avatar" id="sbAvatar">?</div>
@@ -873,7 +873,7 @@ function updateStorageInfo(){
     ? `<span style="color:var(--green)">● Supabase PostgreSQL</span>`
     : `<span style="color:var(--amber)">● localStorage (offline)</span>`;
   const bLabel=isSuperAdmin()?(activeBranch?`Branch:${branches.find(b=>b.id===activeBranch)?.name||activeBranch.slice(-4)}`:'All'):(currentUser?.branchId?`Branch:${branches.find(b=>b.id===currentUser.branchId)?.name||'ID:'+currentUser.branchId.slice(-4)}`:'⚠️ No Branch');
-document.getElementById('storageInfo').innerHTML=`v4.5 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
+document.getElementById('storageInfo').innerHTML=`v4.6 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
 }
 
 // ================================================================
@@ -1978,7 +1978,7 @@ async function saveRepay(){
     await addAdminFeePayment({loanId,amount,date,notes:'Partial admin fee payment'});
       if(amount>=adminFee-0.005){const l2=loans.find(l=>l.id===loanId);if(l2)l2.adminFeesStatus='paid';saveAll();}
       addAudit('RECORD_ADMIN_FEE','AdminFee',loanId,'$'+amount+' partial admin fee');
-      CM('mAddRepay');renderRepayments();updateStorageInfo();
+      CM('mAddRepay');renderRepayments();updateStorageInfo();updateDueBadge();if(currentPage==='duePayments')renderDuePayments();
       toast('$'+fmt(amount)+' recorded as admin fee payment','success');
       return;
     }
@@ -1991,7 +1991,7 @@ async function saveRepay(){
         if(!repayments.find(rp=>rp.id===r.id)){repayments.push(r);const l2=loans.find(l=>l.id===loanId);if(l2&&getLoanBalance(loanId)<=0)l2.status='completed';saveAll();}
         addAudit('RECORD_REPAYMENT','Repayment',r.id,'Split: $'+fmt(adminFee)+' admin + $'+fmt(loanPortion)+' loan');
       }
-      CM('mAddRepay');renderRepayments();updateStorageInfo();
+      CM('mAddRepay');renderRepayments();updateStorageInfo();updateDueBadge();if(currentPage==='duePayments')renderDuePayments();
       toast('Split: $'+fmt(adminFee)+' admin fee + $'+fmt(loanPortion)+' loan repayment','success');
     }catch(e){toast('Error: '+e.message,'error');}
     return;
@@ -2011,10 +2011,10 @@ async function saveRepay(){
         notes:'Fine — defaulted loan'+(c?' ('+c.name+')':'')
       }).catch(()=>{});
       addAudit('RECORD_FINE','Fine',loanId,'$'+fine+' fine on defaulted loan');
-      CM('mAddRepay');renderRepayments();updateStorageInfo();
+      CM('mAddRepay');renderRepayments();updateStorageInfo();updateDueBadge();if(currentPage==='duePayments')renderDuePayments();
       toast('Payment $'+fmt(amount)+' + Fine $'+fmt(fine)+' recorded','success');
     } else {
-      CM('mAddRepay');renderRepayments();updateStorageInfo();
+      CM('mAddRepay');renderRepayments();updateStorageInfo();updateDueBadge();if(currentPage==='duePayments')renderDuePayments();
       toast('Payment of $'+fmt(amount)+' recorded','success');
     }
   }).catch(e=>toast('Error: '+e.message,'error')).finally(()=>unlockModal(_srb));
