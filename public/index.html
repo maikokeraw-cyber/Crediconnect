@@ -1106,7 +1106,7 @@ function renderDuePayments(){
         let penaltyCell = '';
         if(showDays){
           const periodicPay = getLoanTotal(l)/l.term;
-          const penaltyAmt  = Math.round(periodicPay * PENALTY_RATE * 100) / 100;
+          const penaltyAmt  = Math.round(periodicPay * getPenaltyRate(l) * 100) / 100;
           const amort       = buildAmortisation(l);
           const pastDue     = amort.filter(r=>r.dueDate < tzd);
           const currentMissed = pastDue[pastDue.length-1];
@@ -1598,7 +1598,18 @@ function periodicInterestForLoan(loan){
 // ================================================================
 //  AUTO PENALTY — 5% of installment, applied once per late period
 // ================================================================
-const PENALTY_RATE = 0.05; // 5% of installment — change here to adjust globally
+// Penalty rates per branch — update branch names here if needed
+const BRANCH_PENALTY_RATES = {
+  'Harare':   0.05,  // 5%
+  'Bulawayo': 0.035, // 3.5%
+  'Kwekwe':   0.035, // 3.5%
+};
+const DEFAULT_PENALTY_RATE = 0.05; // fallback if branch not listed
+
+function getPenaltyRate(loan){
+  const branch = branches.find(b=>b.id===loan.branchId);
+  return BRANCH_PENALTY_RATES[branch?.name] ?? DEFAULT_PENALTY_RATE;
+}
 
 async function applyAutoPenalties(loan){
   if(getLoanStatus(loan) === 'completed') return 0;
@@ -1608,6 +1619,7 @@ async function applyAutoPenalties(loan){
   const amort       = buildAmortisation(loan);
   const totalPaid   = getLoanPaid(loan.id);
   const periodicPay = getLoanTotal(loan) / loan.term;
+  const PENALTY_RATE = getPenaltyRate(loan); // branch-specific rate
   const c           = clients.find(c=>c.id===loan.clientId);
 
   // Only the MOST RECENT missed installment — not all historical
@@ -1633,7 +1645,7 @@ async function applyAutoPenalties(loan){
     loanId: loan.id,
     amount: penaltyAmt,
     date:   currentMissed.dueDate,
-    notes:  `Auto penalty period ${currentMissed.month} — 5% of $${fmt(periodicPay)} (${c?c.name:''})`
+    notes:  `Auto penalty period ${currentMissed.month} — ${(PENALTY_RATE*100)}% of $${fmt(periodicPay)} (${c?c.name:''})`
   });
   try{
     const fresh = await apiFetch('GET','/api/admin-fees'+branchParam());
