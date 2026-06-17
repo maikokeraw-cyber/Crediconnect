@@ -2063,18 +2063,42 @@ async function saveRepay(){
   }).catch(e=>toast('Error: '+e.message,'error')).finally(()=>unlockModal(_srb));
 }
 function deleteRepayment(id){
-  if(!confirm('Delete this payment?'))return;
+  if(!confirm('Delete this payment?')) return;
+  // Capture repayment info BEFORE deletion for audit
+  const rep = repayments.find(r=>r.id===id);
+  const loan = rep ? loans.find(l=>l.id===rep.loanId) : null;
+  const c = loan ? clients.find(c=>c.id===loan.clientId) : null;
+  const auditDetail = rep
+    ? `$${fmt(rep.amount)} on ${fmtDate(rep.date)}${c?' — '+c.name:''}${loan?' (loan $'+fmt(loan.amount)+')':''}`
+    : 'Deleted';
   deleteRepaymentData(id).then(()=>{
-    addAudit('DELETE_REPAYMENT','Repayment',id,'Deleted');
-    renderRepayments();updateStorageInfo();toast('Payment deleted','success');
+    addAudit('DELETE_REPAYMENT','Repayment',id, auditDetail);
+    renderRepayments();
+    renderLoans();         // refresh portfolio — loan status may change
+    updateDueBadge();      // update overdue badge count
+    updateStorageInfo();
+    if(currentPage==='duePayments') renderDuePayments(); // refresh if on due page
+    toast('Payment deleted','success');
   }).catch(e=>toast('Error: '+e.message,'error'));
 }
 async function handleDeleteAdminFee(id){
-  if(!confirm('Delete this admin fee payment?')) return;
+  const af = adminFeePayments.find(a=>a.id===id);
+  const isPenalty = af && (af.notes||'').toLowerCase().includes('auto penalty');
+  const msg = isPenalty
+    ? `Delete this penalty? ⚠️ Note: it will re-apply automatically next time the Due Payments page is visited.`
+    : 'Delete this admin fee payment?';
+  if(!confirm(msg)) return;
+  const loan = af ? loans.find(l=>l.id===af.loanId) : null;
+  const c = loan ? clients.find(c=>c.id===loan.clientId) : null;
+  const auditDetail = af ? `$${fmt(af.amount)}${c?' — '+c.name:''}${isPenalty?' (penalty)':' (admin fee)'}` : 'Deleted';
   try{
     await deleteAdminFeePayment(id);
-    addAudit('DELETE_ADMIN_FEE','AdminFee',id,'Deleted');
-    renderRepayments();updateStorageInfo();toast('Admin fee payment deleted','success');
+    addAudit('DELETE_ADMIN_FEE','AdminFee',id, auditDetail);
+    renderRepayments();
+    updateDueBadge();
+    updateStorageInfo();
+    if(currentPage==='duePayments') renderDuePayments();
+    toast(`${isPenalty?'Penalty':'Admin fee payment'} deleted`,'success');
   }catch(e){toast('Error: '+e.message,'error');}
 }
 
