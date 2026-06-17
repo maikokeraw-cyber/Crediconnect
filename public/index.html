@@ -1095,7 +1095,7 @@ function renderDuePayments(){
         <th>Balance</th>
         <th>Due Date</th>
         ${showDays?'<th>Days Overdue</th>':''}
-        ${showDays?'<th style="color:var(--red)">Penalty (5%)</th>':''}
+        ${showDays?'<th style="color:var(--red)">Penalty</th>':''}
         <th></th>
       </tr></thead>
       <tbody>${items.map(({loan:l,client:c,row,bal,daysOverdue,freqBadge})=>{
@@ -1114,8 +1114,8 @@ function renderDuePayments(){
             af.loanId===l.id && (af.notes||'').includes(`Auto penalty period ${currentMissed.month}`)
           );
           penaltyCell = alreadyCharged
-            ? `<td style="font-family:'DM Mono',monospace;color:var(--red);font-weight:600">$${fmt(penaltyAmt)} ✓</td>`
-            : `<td style="font-family:'DM Mono',monospace;color:var(--text3)">$${fmt(penaltyAmt)}</td>`;
+            ? `<td style="font-family:'DM Mono',monospace;color:var(--red);font-weight:600">$${fmt(penaltyAmt)} <span style="font-size:10px;opacity:0.7">(${getPenaltyRate(l)*100}%)</span> ✓</td>`
+            : `<td style="font-family:'DM Mono',monospace;color:var(--text3)">$${fmt(penaltyAmt)} <span style="font-size:10px;opacity:0.7">(${getPenaltyRate(l)*100}%)</span></td>`;
         }
         return `<tr>
           <td class="primary">${av}</td>
