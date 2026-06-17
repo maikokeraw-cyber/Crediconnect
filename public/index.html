@@ -2212,6 +2212,9 @@ function renderReports(){
   const pendingPenalties=adminFeePayments.filter(a=>(a.notes||'').toLowerCase().includes('auto penalty'));
   const totalAdminFees=collectedFees.reduce((s,a)=>s+a.amount,0);
   const totalPendingPenalties=pendingPenalties.reduce((s,a)=>s+a.amount,0);
+  const loanBookLoans=loans.filter(l=>getLoanStatus(l)!=='completed');
+  const loanBook=loanBookLoans.reduce((s,l)=>s+getLoanBalance(l.id),0);
+  const to=al.reduce((s,l)=>s+getLoanBalance(l.id),0);
   // True PAR30: outstanding balance of loans where a payment is 30+ days overdue
   // Numerator = sum of balances of loans with at least one payment 30+ days late
   // Denominator = total outstanding balance of ALL active loans
