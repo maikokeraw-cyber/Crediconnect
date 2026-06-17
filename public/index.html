@@ -1114,8 +1114,8 @@ function renderDuePayments(){
             af.loanId===l.id && (af.notes||'').includes(`Auto penalty period ${currentMissed.month}`)
           );
           penaltyCell = alreadyCharged
-            ? `<td style="font-family:'DM Mono',monospace;color:var(--red);font-weight:600">$${fmt(penaltyAmt)} <span style="font-size:10px;opacity:0.7">(${getPenaltyRate(l)*100}%)</span> ✓</td>`
-            : `<td style="font-family:'DM Mono',monospace;color:var(--text3)">$${fmt(penaltyAmt)} <span style="font-size:10px;opacity:0.7">(${getPenaltyRate(l)*100}%)</span></td>`;
+            ? `<td style="font-family:'DM Mono',monospace;color:var(--red);font-weight:600">$${fmt(penaltyAmt)} <span style="font-size:10px;opacity:0.7">(${+(getPenaltyRate(l)*100).toFixed(2)}%)</span> ✓</td>`
+            : `<td style="font-family:'DM Mono',monospace;color:var(--text3)">$${fmt(penaltyAmt)} <span style="font-size:10px;opacity:0.7">(${+(getPenaltyRate(l)*100).toFixed(2)}%)</span></td>`;
         }
         return `<tr>
           <td class="primary">${av}</td>
@@ -1645,7 +1645,7 @@ async function applyAutoPenalties(loan){
     loanId: loan.id,
     amount: penaltyAmt,
     date:   currentMissed.dueDate,
-    notes:  `Auto penalty period ${currentMissed.month} — ${(PENALTY_RATE*100)}% of $${fmt(periodicPay)} (${c?c.name:''})`
+    notes:  `Auto penalty period ${currentMissed.month} — ${+(PENALTY_RATE*100).toFixed(2)}% of $${fmt(periodicPay)} (${c?c.name:''})`
   });
   try{
     const fresh = await apiFetch('GET','/api/admin-fees'+branchParam());
