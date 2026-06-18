@@ -630,12 +630,18 @@ app.post('/api/admin-fees', requireAuth, requireDB, requireRole('admin','loan_of
     const { loanId, amount, date, notes } = req.body;
     if (!loanId || !amount || !date) return res.status(400).json({ error: 'loanId, amount and date required' });
     const id = uuidv4();
+    const isPenalty = (notes||'').toLowerCase().includes('auto penalty');
     await pool.query(
       `INSERT INTO admin_fee_payments (id,loan_id,amount,date,notes,added_by) VALUES ($1,$2,$3,$4,$5,$6)`,
       [id, loanId, amount, date, notes||null, req.user.id]
     );
-    await pool.query(`UPDATE loans SET admin_fees_status='paid',updated_at=NOW() WHERE id=$1`, [loanId]);
-    await audit(req.user.id, req.user.username, 'RECORD_ADMIN_FEE', 'AdminFee', id, `$${amount} for loan ${loanId}`);
+    // Only update admin_fees_status for actual admin fees — not auto penalties
+    if(!isPenalty){
+      await pool.query(`UPDATE loans SET admin_fees_status='paid',updated_at=NOW() WHERE id=$1`, [loanId]);
+    }
+    // Use different audit action for penalties vs admin fees
+    const auditAction = isPenalty ? 'AUTO_PENALTY' : 'RECORD_ADMIN_FEE';
+    await audit(req.user.id, req.user.username, auditAction, 'AdminFee', id, notes||`$${amount} for loan ${loanId}`);
     const { rows } = await pool.query('SELECT * FROM admin_fee_payments WHERE id=$1', [id]);
     res.status(201).json(mapAdminFee(rows[0]));
   } catch (err) { res.status(500).json({ error: err.message }); }
