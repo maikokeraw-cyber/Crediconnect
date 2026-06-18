@@ -705,6 +705,137 @@ app.get('/api/audit', requireAuth, requireDB, requireRole('admin'), async (req, 
 });
 
 // ================================================================
+//  CRON — Daily auto-penalty (called by external cron at 8am ZW)
+//  Secured with CRON_SECRET env variable
+// ================================================================
+
+// Server-side amortisation (mirrors frontend buildAmortisation)
+function serverBuildAmortisation(loan){
+  const amount      = Number(loan.amount);
+  const rate        = Number(loan.interest_rate);
+  const term        = Number(loan.term);
+  const freq        = loan.term_frequency || 'monthly';
+  const periodicPay = (amount + amount * rate / 100) / term;
+  const rows        = [];
+
+  const baseStr = loan.repayment_start_date
+    ? loan.repayment_start_date.toISOString().slice(0,10)
+    : loan.start_date.toISOString().slice(0,10);
+  const base    = new Date(baseStr + 'T00:00:00');
+  const hasRS   = !!loan.repayment_start_date;
+
+  const toLD = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  const skipSun = d => { if(d.getDay()===0) d.setDate(d.getDate()+1); return d; };
+
+  if(freq==='daily'){
+    const cur = new Date(base);
+    if(!hasRS) cur.setDate(cur.getDate()+1);
+    for(let m=1;m<=term;m++){
+      if(m>1) cur.setDate(cur.getDate()+1);
+      while(cur.getDay()===0) cur.setDate(cur.getDate()+1);
+      rows.push({ month:m, dueDate:toLD(new Date(cur)), payment:periodicPay });
+    }
+  } else {
+    for(let m=1;m<=term;m++){
+      const due = new Date(base);
+      if(hasRS){
+        if(freq==='monthly') due.setMonth(due.getMonth()+(m-1));
+        else                 due.setDate(due.getDate()+((m-1)*7));
+      } else {
+        if(freq==='monthly') due.setMonth(due.getMonth()+m);
+        else                 due.setDate(due.getDate()+(m*7));
+      }
+      skipSun(due);
+      rows.push({ month:m, dueDate:toLD(due), payment:periodicPay });
+    }
+  }
+  return rows;
+}
+
+app.post('/api/cron/penalties', async (req, res) => {
+  // Verify secret — must match CRON_SECRET env var on Render
+  const secret = req.headers['x-cron-secret'] || req.query.secret;
+  if(!secret || secret !== process.env.CRON_SECRET){
+    return res.status(401).json({ error: 'Unauthorized — invalid cron secret' });
+  }
+  if(!dbConnected) return res.status(503).json({ error: 'DB not connected' });
+
+  const BRANCH_RATES   = { 'Harare':0.05, 'Bulawayo':0.035, 'Kwekwe':0.035 };
+  const DEFAULT_RATE   = 0.05;
+  // Zimbabwe UTC+2
+  const nowZW          = new Date(new Date().getTime() + 2*60*60*1000);
+  const todayStr       = nowZW.toISOString().slice(0,10);
+
+  let applied=0, skipped=0, errors=0;
+  const details=[];
+
+  try{
+    // Fetch all non-completed loans with branch name and client name
+    const { rows: loans } = await pool.query(`
+      SELECT l.*, b.name AS branch_name, c.name AS client_name
+      FROM loans l
+      LEFT JOIN branches b ON b.id = l.branch_id
+      LEFT JOIN clients  c ON c.id = l.client_id
+      WHERE l.status != 'completed'
+    `);
+
+    for(const loan of loans){
+      try{
+        // Total repayments for this loan
+        const { rows: reps } = await pool.query(
+          `SELECT COALESCE(SUM(amount),0)::float AS total FROM repayments WHERE loan_id=$1`, [loan.id]
+        );
+        const totalPaid   = Number(reps[0].total);
+        const amort       = serverBuildAmortisation(loan);
+        const periodicPay = amort[0]?.payment || 0;
+
+        // Past-due periods only
+        const pastDue     = amort.filter(r => r.dueDate < todayStr);
+        if(!pastDue.length){ skipped++; continue; }
+
+        const currentMissed = pastDue[pastDue.length-1];
+        const amountDueNow  = pastDue.length * periodicPay;
+
+        // Client on good schedule — skip
+        if(totalPaid >= amountDueNow - 0.005){ skipped++; continue; }
+
+        // Already penalised this period?
+        const { rows: existing } = await pool.query(
+          `SELECT id FROM admin_fee_payments WHERE loan_id=$1 AND notes ILIKE $2`,
+          [loan.id, `%Auto penalty period ${currentMissed.month}%`]
+        );
+        if(existing.length){ skipped++; continue; }
+
+        // Apply penalty
+        const rate       = BRANCH_RATES[loan.branch_name] || DEFAULT_RATE;
+        const penaltyAmt = Math.round(periodicPay * rate * 10000) / 10000;
+        const noteText   = `Auto penalty period ${currentMissed.month} — ${+(rate*100).toFixed(2)}% of $${periodicPay.toFixed(2)} (${loan.client_name||''})`;
+        const penaltyId  = uuidv4();
+
+        await pool.query(
+          `INSERT INTO admin_fee_payments (id,loan_id,amount,date,notes,added_by) VALUES ($1,$2,$3,$4,$5,$6)`,
+          [penaltyId, loan.id, penaltyAmt, currentMissed.dueDate, noteText, 'cron']
+        );
+        await pool.query(
+          `INSERT INTO audit_log (id,user_id,username,branch_id,action,entity,entity_id,detail)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [uuidv4(), null, 'cron', loan.branch_id, 'AUTO_PENALTY', 'AdminFee', penaltyId,
+           `Auto penalty period ${currentMissed.month} — ${loan.client_name||''} — $${penaltyAmt}`]
+        );
+        applied++;
+        details.push({ client:loan.client_name, amount:penaltyAmt, period:currentMissed.month });
+      }catch(e){ errors++; console.error('Penalty error loan',loan.id,e.message); }
+    }
+
+    console.log(`[CRON] ${todayStr} — Penalties applied:${applied} skipped:${skipped} errors:${errors}`);
+    res.json({ ok:true, date:todayStr, applied, skipped, errors, details });
+  }catch(err){
+    console.error('[CRON] penalties error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================================================================
 //  FALLBACK → serve frontend
 // ================================================================
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
