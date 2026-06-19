@@ -1557,17 +1557,16 @@ function reviewLoan(){
   OM('mConfirmLoan'); // keep mAddLoan open behind it
 }
 
-function saveLoan(){
+async function saveLoan(){
   const clientId=document.getElementById('fLC').value,amount=parseFloat(document.getElementById('fLA').value),rate=parseFloat(document.getElementById('fLR').value),term=parseInt(document.getElementById('fLT').value),date=document.getElementById('fLD').value,freq=document.getElementById('fLF').value;
   const adminFees=parseFloat(document.getElementById('fLAF').value);
-  if(!myBranchId()&&!isSuperAdmin()) return toast('Cannot disburse loan — your account has no branch assigned. Ask your Super Admin.','error');
-  if(!clientId||!amount||!rate||!term||!date)return toast('Please fill all required fields','error');
-  const _slb=lockModal('Disbursing…');
-  if(!adminFees&&adminFees!==0)return toast('Admin Fees is required. Enter 0 if no fees apply.','error');
-  if(adminFees<0)return toast('Admin Fees cannot be negative.','error');
-  const dateErr=validateDate(date,'Disbursement date'); if(dateErr)return toast(dateErr,'error');
+  if(!myBranchId()&&!isSuperAdmin()){toast('Cannot disburse loan — your account has no branch assigned. Ask your Super Admin.','error');return;}
+  if(!clientId||!amount||!rate||!term||!date){toast('Please fill all required fields','error');return;}
+  if(!adminFees&&adminFees!==0){toast('Admin Fees is required. Enter 0 if no fees apply.','error');return;}
+  if(adminFees<0){toast('Admin Fees cannot be negative.','error');return;}
+  const dateErr=validateDate(date,'Disbursement date'); if(dateErr){toast(dateErr,'error');return;}
   const cashToCustomer=amount-adminFees;
-  if(cashToCustomer<0)return toast('Admin fees cannot exceed the loan amount.','error');
+  if(cashToCustomer<0){toast('Admin fees cannot exceed the loan amount.','error');return;}
   const repayStart=document.getElementById('fLRS')?.value||'';
   addLoan({clientId,amount,interestRate:rate,term,termFrequency:freq,startDate:date,repaymentStartDate:repayStart||null,purpose:document.getElementById('fLP').value.trim(),notes:document.getElementById('fLN').value.trim(),adminFees,adminFeesPaid:true,branchId:myBranchId()}).then(r=>{
     // Admin fee recorded immediately at disbursement

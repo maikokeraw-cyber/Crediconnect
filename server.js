@@ -1,5 +1,5 @@
 // ================================================================
-//  Credinova v4.1 — Express + PostgreSQL Server
+//  Credinova v4.8 — Express + PostgreSQL Server
 // ================================================================
 
 require('dotenv').config();
