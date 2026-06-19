@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Credinova v4.7 — Financial Solutions</title>
+<title>Credinova v4.8 — Financial Solutions</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
@@ -236,7 +236,7 @@ input::placeholder{color:var(--text3)}
   </div>
   <div id="appLayout">
     <nav id="sidebar">
-      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v4.7</div></div>
+      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v4.8</div></div>
       <div class="nav">
         <div class="nav-section">Overview</div>
         <div class="nav-item active" id="nav-dashboard" onclick="navigate('dashboard')" class="nav-item-admin-only"><span class="icon">📊</span>Dashboard</div>
@@ -258,7 +258,7 @@ input::placeholder{color:var(--text3)}
         <div class="nav-item" id="nav-profile" onclick="navigate('profile')"><span class="icon">⚙️</span>My Profile</div>
       </div>
       <div style="padding:6px 14px 2px;text-align:right">
-        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:0.5px">v4.7</span>
+        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:0.5px">v4.8</span>
       </div>
       <div class="sidebar-user">
         <div class="sidebar-avatar" id="sbAvatar">?</div>
@@ -323,7 +323,7 @@ input::placeholder{color:var(--text3)}
 <div class="modal-backdrop" id="mConfirmClient"><div class="modal">
   <div class="modal-header"><div class="modal-title">⚠️ Confirm Client Details</div><button class="modal-close" onclick="CM('mConfirmClient')">×</button></div>
   <div class="modal-body"><div id="confirmClientBody" style="font-size:13px"></div></div>
-  <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mConfirmClient')">← Go Back &amp; Edit</button><button class="btn btn-primary" id="confirmClientBtn" onclick="this.disabled=true;this.textContent='Saving…';saveClient()">✅ Confirm &amp; Save</button></div>
+  <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mConfirmClient');OM('mAddClient')">← Go Back &amp; Edit</button><button class="btn btn-primary" id="confirmClientBtn" onclick="(()=>{const btn=this;btn.disabled=true;btn.textContent='Saving…';saveClient().catch(()=>{btn.disabled=false;btn.textContent='✅ Confirm & Save';})})()">✅ Confirm &amp; Save</button></div>
 </div></div>
 
 <div class="modal-backdrop" id="mClientDetail"><div class="modal modal-wide">
@@ -370,7 +370,7 @@ input::placeholder{color:var(--text3)}
   <div id="loanPreview" style="display:none;margin-top:12px;padding:12px;background:var(--surface);border-radius:var(--radius-sm);font-size:12.5px;color:var(--text2)">
     <strong style="color:var(--gold2)">Loan Preview</strong><div id="loanPreviewText" style="margin-top:6px;line-height:1.8"></div>
   </div></div>
-  <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mAddLoan')">Cancel</button><button class="btn btn-primary" onclick="saveLoan()">Disburse Loan</button></div>
+  <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mAddLoan')">Cancel</button><button class="btn btn-primary" onclick="if(this._busy)return;this._busy=true;this.textContent='Processing…';this.disabled=true;saveLoan().finally(()=>{this._busy=false;this.textContent='Disburse Loan';this.disabled=false;})">Disburse Loan</button></div>
 </div></div>
 
 <div class="modal-backdrop" id="mAddRepay"><div class="modal">
@@ -874,7 +874,7 @@ function updateStorageInfo(){
     ? `<span style="color:var(--green)">● Supabase PostgreSQL</span>`
     : `<span style="color:var(--amber)">● localStorage (offline)</span>`;
   const bLabel=isSuperAdmin()?(activeBranch?`Branch:${branches.find(b=>b.id===activeBranch)?.name||activeBranch.slice(-4)}`:'All'):(currentUser?.branchId?`Branch:${branches.find(b=>b.id===currentUser.branchId)?.name||'ID:'+currentUser.branchId.slice(-4)}`:'⚠️ No Branch');
-document.getElementById('storageInfo').innerHTML=`v4.7 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
+document.getElementById('storageInfo').innerHTML=`v4.8 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
 }
 
 // ================================================================
@@ -1332,7 +1332,7 @@ function reviewClient(){
         <td style="padding:8px 10px;font-weight:${k==='Full Name'||k==='Phone'?'600':'400'};color:var(--text)">${v}</td>
       </tr>`).join('')}
     </table>`;
-  CM('mAddClient');
+  // Keep mAddClient open so Go Back can return to it
   OM('mConfirmClient');
 }
 function openAddClient(){
