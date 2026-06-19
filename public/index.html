@@ -1902,9 +1902,15 @@ async function openLoanDetail(id){
   OM('mLoanDetail');
 }
 function deleteLoan(id){
-  if(!confirm('Delete this loan and all payments?'))return;
+  const loan = loans.find(l=>l.id===id);
+  const c    = loan ? clients.find(c=>c.id===loan.clientId) : null;
+  const auditDetail = loan
+    ? `${c?c.name+' — ':''}$${fmt(loan.amount)} ${loan.termFrequency||''} | ${loan.purpose||'No purpose'}`
+    : 'Deleted';
+  if(!confirm(`Delete loan${c?' for '+c.name:''}${loan?' ($'+fmt(loan.amount)+')':''}? This removes all payments too.`))return;
+  // Audit BEFORE deletion so loan data is still available
+  addAudit('DELETE_LOAN','Loan',id, auditDetail);
   deleteLoanData(id).then(()=>{
-    addAudit('DELETE_LOAN','Loan',id,'Deleted');
     CM('mLoanDetail');renderLoans();updateStorageInfo();toast('Loan deleted','success');
   }).catch(e=>toast('Error: '+e.message,'error'));
 }
