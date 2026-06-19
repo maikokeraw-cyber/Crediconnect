@@ -1487,6 +1487,7 @@ function openAddLoan(preselect){
   document.getElementById('fLF').value='monthly';
   document.getElementById('loanPreview').style.display='none';
   setMaxDate('fLD');
+  suggestRepayStart(); // auto-fill first repayment date on open
   OM('mAddLoan');
 }
 function openAddLoanForClient(id){openAddLoan(id);}
@@ -1649,7 +1650,7 @@ function suggestRepayStart(){
   else if(f==='weekly') base.setDate(base.getDate()+7);
   else                  base.setMonth(base.getMonth()+1);
   skipSunday(base);
-  rs.value = base.toISOString().slice(0,10);
+  rs.value = toLocalDate(base); // use local date to avoid UTC offset bug
   updateLoanPreview();
 }
 function periodicInterestForLoan(loan){
