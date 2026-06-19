@@ -370,7 +370,14 @@ input::placeholder{color:var(--text3)}
   <div id="loanPreview" style="display:none;margin-top:12px;padding:12px;background:var(--surface);border-radius:var(--radius-sm);font-size:12.5px;color:var(--text2)">
     <strong style="color:var(--gold2)">Loan Preview</strong><div id="loanPreviewText" style="margin-top:6px;line-height:1.8"></div>
   </div></div>
-  <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mAddLoan')">Cancel</button><button class="btn btn-primary" onclick="if(this._busy)return;this._busy=true;this.textContent='Processing…';this.disabled=true;saveLoan().finally(()=>{this._busy=false;this.textContent='Disburse Loan';this.disabled=false;})">Disburse Loan</button></div>
+  <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mAddLoan')">Cancel</button><button class="btn btn-primary" onclick="reviewLoan()">Review & Confirm</button></div>
+</div></div>
+
+<!-- Loan Confirmation Modal -->
+<div class="modal-backdrop" id="mConfirmLoan"><div class="modal">
+  <div class="modal-header"><div class="modal-title">⚠️ Confirm Loan Disbursement</div><button class="modal-close" onclick="CM('mConfirmLoan');OM('mAddLoan')">×</button></div>
+  <div class="modal-body"><div id="confirmLoanBody" style="font-size:13px"></div></div>
+  <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mConfirmLoan');OM('mAddLoan')">← Go Back &amp; Edit</button><button class="btn btn-primary" id="confirmLoanBtn" onclick="(()=>{const btn=this;btn.disabled=true;btn.textContent='Disbursing…';saveLoan().catch(()=>{btn.disabled=false;btn.textContent='✅ Confirm &amp; Disburse';})})()">✅ Confirm &amp; Disburse</button></div>
 </div></div>
 
 <div class="modal-backdrop" id="mAddRepay"><div class="modal">
@@ -1495,6 +1502,61 @@ function updateLoanPreview(){
   }else p.style.display='none';
 }
 
+function reviewLoan(){
+  const clientId = document.getElementById('fLC').value;
+  const amount   = parseFloat(document.getElementById('fLA').value);
+  const rate     = parseFloat(document.getElementById('fLR').value);
+  const term     = parseInt(document.getElementById('fLT').value);
+  const date     = document.getElementById('fLD').value;
+  const freq     = document.getElementById('fLF').value;
+  const adminFees= parseFloat(document.getElementById('fLAF').value)||0;
+  const repayStart=document.getElementById('fLRS')?.value||'';
+  const purpose  = document.getElementById('fLP').value.trim();
+
+  if(!myBranchId()&&!isSuperAdmin()) return toast('No branch assigned. Ask Super Admin.','error');
+  if(!clientId||!amount||!rate||!term||!date) return toast('Please fill all required fields','error');
+  if(isNaN(adminFees)||adminFees<0) return toast('Admin Fees must be 0 or more','error');
+  const dateErr=validateDate(date,'Disbursement date'); if(dateErr) return toast(dateErr,'error');
+  const cashToCustomer = amount - adminFees;
+  if(cashToCustomer<0) return toast('Admin fees cannot exceed the loan amount','error');
+
+  const c = clients.find(c=>c.id===clientId);
+  const totalRepay = amount*(1+rate/100);
+  const perInstall = totalRepay/term;
+  const branch = branches.find(b=>b.id===(isSuperAdmin()?(document.getElementById('branchSelect')?.value||activeBranch):myBranchId()));
+
+  document.getElementById('confirmLoanBody').innerHTML=`
+    <div style="background:rgba(240,168,50,0.08);border:1px solid var(--amber);border-radius:var(--radius-sm);padding:12px;margin-bottom:14px;font-size:12px;color:var(--amber)">
+      Review all details carefully. This cannot be undone once disbursed.
+    </div>
+    <table style="width:100%;border-collapse:collapse">
+      ${[
+        ['Client',          `<strong>${c?c.name:'Unknown'}</strong>`],
+        ['Branch',          branch?branch.name:'—'],
+        ['Loan Amount',     `<strong style="color:var(--green)">$${fmt(amount)}</strong>`],
+        ['Interest Rate',   `${rate}%`],
+        ['Term',            `${term} ${freq} payments`],
+        ['Disbursement',    fmtDate(date)],
+        ['First Repayment', repayStart?fmtDate(repayStart):'Auto-calculated'],
+        ['Admin Fee',       adminFees>0?`<span style="color:var(--red)">-$${fmt(adminFees)} (retained)</span>`:'$0.00'],
+        ['Cash to Client',  `<strong style="color:var(--amber)">$${fmt(cashToCustomer)}</strong>`],
+        ['Per Instalment',  `<strong>$${fmt(perInstall)}</strong>`],
+        ['Total Repayable', `$${fmt(totalRepay)}`],
+        ['Purpose',         purpose||'—'],
+      ].map(([k,v])=>`
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 10px;color:var(--text3);font-size:12px;width:40%">${k}</td>
+        <td style="padding:8px 10px;font-size:13px">${v}</td>
+      </tr>`).join('')}
+    </table>`;
+
+  // Reset confirm button in case it was previously used
+  const btn = document.getElementById('confirmLoanBtn');
+  if(btn){ btn.disabled=false; btn.textContent='✅ Confirm & Disburse'; }
+
+  OM('mConfirmLoan'); // keep mAddLoan open behind it
+}
+
 function saveLoan(){
   const clientId=document.getElementById('fLC').value,amount=parseFloat(document.getElementById('fLA').value),rate=parseFloat(document.getElementById('fLR').value),term=parseInt(document.getElementById('fLT').value),date=document.getElementById('fLD').value,freq=document.getElementById('fLF').value;
   const adminFees=parseFloat(document.getElementById('fLAF').value);
@@ -1506,7 +1568,6 @@ function saveLoan(){
   const dateErr=validateDate(date,'Disbursement date'); if(dateErr)return toast(dateErr,'error');
   const cashToCustomer=amount-adminFees;
   if(cashToCustomer<0)return toast('Admin fees cannot exceed the loan amount.','error');
-  if(!confirm('Confirm Disbursement\n\nLoan Amount:         $'+fmt(amount)+'\nAdmin Fee (retained): -$'+fmt(adminFees)+'\nCash to Customer:    $'+fmt(cashToCustomer)+'\n\nAll repayment calculations remain based on the full loan amount of $'+fmt(amount)+'.\n\nProceed?')) return;
   const repayStart=document.getElementById('fLRS')?.value||'';
   addLoan({clientId,amount,interestRate:rate,term,termFrequency:freq,startDate:date,repaymentStartDate:repayStart||null,purpose:document.getElementById('fLP').value.trim(),notes:document.getElementById('fLN').value.trim(),adminFees,adminFeesPaid:true,branchId:myBranchId()}).then(r=>{
     // Admin fee recorded immediately at disbursement
@@ -1519,7 +1580,7 @@ function saveLoan(){
     }
     const clientForAudit = clients.find(c=>c.id===clientId);
     addAudit('DISBURSE_LOAN','Loan',r.id,`${clientForAudit?clientForAudit.name+' — ':''}$${fmt(amount)} | Admin fee: $${fmt(adminFees)} | Cash to client: $${fmt(cashToCustomer)}`);
-    CM('mAddLoan');renderLoans();updateStorageInfo();
+    CM('mConfirmLoan');CM('mAddLoan');renderLoans();updateStorageInfo();
     toast('Loan disbursed — $'+fmt(cashToCustomer)+' to customer'+(adminFees>0?', $'+fmt(adminFees)+' admin fee retained in business':''),'success');
   }).catch(e=>toast('Error: '+e.message,'error'));
 }
