@@ -761,13 +761,40 @@ app.get('/api/mobile-applications/:id', requireAuth, requireDB, requireRole('adm
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Search mobile customers
+// Search customers — checks BOTH mobile_customers (app registrations) AND
+// the main clients table, so walk-in clients can be found too.
 app.get('/api/mobile-customers/search', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
   try {
     const q = (req.query.q||'').trim();
     if (q.length < 2) return res.json([]);
-    const { rows } = await pool.query(`SELECT id,name,phone,national_id,email FROM mobile_customers WHERE name ILIKE $1 OR phone ILIKE $1 LIMIT 10`, [`%${q}%`]);
-    res.json(rows.map(c=>({id:c.id,name:c.name,phone:c.phone,nationalId:c.national_id||'',email:c.email||''})));
+    const like = `%${q}%`;
+
+    // Mobile app customers
+    const { rows: mobileRows } = await pool.query(
+      `SELECT id, name, phone, national_id, email, 'mobile' AS source
+       FROM mobile_customers WHERE name ILIKE $1 OR phone ILIKE $1 LIMIT 8`, [like]
+    );
+
+    // Main clients — only those NOT already in mobile_customers (match by phone)
+    const { rows: clientRows } = await pool.query(
+      `SELECT c.id, c.name, c.phone, c.national_id, c.email, 'client' AS source
+       FROM clients c
+       WHERE (c.name ILIKE $1 OR c.phone ILIKE $1)
+         AND NOT EXISTS (
+           SELECT 1 FROM mobile_customers mc WHERE mc.phone = c.phone
+         )
+       LIMIT 8`, [like]
+    );
+
+    const results = [...mobileRows, ...clientRows].slice(0, 10).map(r => ({
+      id: r.id,
+      name: r.name,
+      phone: r.phone,
+      nationalId: r.national_id||'',
+      email: r.email||'',
+      source: r.source  // 'mobile' or 'client' — used to know if we need to create in mobile_customers
+    }));
+    res.json(results);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -787,6 +814,19 @@ app.post('/api/mobile-applications', requireAuth, requireDB, requireRole('admin'
       else {
         const ins = await conn.query(`INSERT INTO mobile_customers (name,phone,national_id,email,status) VALUES ($1,$2,$3,$4,'active') RETURNING id`, [newCustomer.name,newCustomer.phone,newCustomer.nationalId||null,newCustomer.email||null]);
         custId = ins.rows[0].id;
+      }
+    }
+    // If a main-system client was selected (source='client'), create them in mobile_customers
+    if (custId && req.body.customerSource === 'client') {
+      const ex = await conn.query('SELECT id FROM mobile_customers WHERE phone=(SELECT phone FROM clients WHERE id=$1)', [custId]);
+      if (ex.rows.length) {
+        custId = ex.rows[0].id; // already exists in mobile_customers
+      } else {
+        const cl = await conn.query('SELECT name,phone,national_id,email FROM clients WHERE id=$1',[custId]);
+        if (cl.rows.length) {
+          const ins = await conn.query(`INSERT INTO mobile_customers (name,phone,national_id,email,status) VALUES ($1,$2,$3,$4,'active') RETURNING id`,[cl.rows[0].name,cl.rows[0].phone,cl.rows[0].national_id||null,cl.rows[0].email||null]);
+          custId = ins.rows[0].id;
+        }
       }
     }
     const ins = await conn.query(`INSERT INTO mobile_loan_requests (customer_id,amount,interest_rate,term,term_frequency,purpose,notes,status,application_fee,source,created_by,branch_id) VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8,'manual',$9,$10) RETURNING id`,

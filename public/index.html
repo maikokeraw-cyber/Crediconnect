@@ -1185,7 +1185,12 @@ function searchMobileCustomers(){
       const results=await apiFetch('GET',`/api/mobile-customers/search?q=${encodeURIComponent(q)}`);
       if(!results.length){box.innerHTML='<div style="padding:8px 10px;color:var(--text3);font-size:12px">No customers found</div>';return;}
       window._mmaSearchResults=results;
-      box.innerHTML=results.map((c,i)=>`<div onclick="selectMobileCustomer(${i})" style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:12px" onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background='transparent'"><strong>${c.name}</strong> — ${c.phone}</div>`).join('');
+      box.innerHTML=results.map((c,i)=>`<div onclick="selectMobileCustomer(${i})" style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:12px" onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background='transparent'">
+        <strong>${c.name}</strong> — ${c.phone}
+        <span style="font-size:10px;margin-left:6px;padding:1px 5px;border-radius:6px;${c.source==='mobile'?'background:var(--blue-dim);color:var(--blue)':'background:var(--purple-dim);color:var(--purple)'}">
+          ${c.source==='mobile'?'Mobile App':'Existing Client'}
+        </span>
+      </div>`).join('');
     }catch(e){box.innerHTML='<div style="padding:8px 10px;color:var(--red);font-size:12px">Search failed</div>';}
   },300);
 }
@@ -1220,6 +1225,7 @@ async function saveMobileApp(){
   if(_mobileAppCustomerMode==='existing'){
     if(!_mobileAppSelectedCustomer){toast('Please select an existing customer, or switch to New Customer','error');return;}
     payload.customerId=_mobileAppSelectedCustomer.id;
+    payload.customerSource=_mobileAppSelectedCustomer.source||'mobile'; // 'mobile' or 'client'
   }else{
     const name=document.getElementById('mmaNewName').value.trim();
     const phone=document.getElementById('mmaNewPhone').value.trim();
