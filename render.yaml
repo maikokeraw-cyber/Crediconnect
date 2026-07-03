@@ -11,7 +11,7 @@ services:
     region: oregon
     plan: free
     buildCommand: npm install
-    startCommand: node scripts/setupDb.js && npm start
+    startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
