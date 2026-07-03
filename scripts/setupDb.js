@@ -164,6 +164,98 @@ async function setup() {
     `);
     await client.query(`ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS branch_id VARCHAR(50)`);
 
+    // ── Mobile App tables (created by the customer-facing mobile app) ──
+    // CREATE TABLE IF NOT EXISTS is safe here — it will NOT touch these
+    // tables if they already exist in production with live data.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS mobile_customers (
+        id              UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+        name            TEXT,
+        phone           TEXT          UNIQUE,
+        national_id     TEXT          UNIQUE,
+        email           TEXT,
+        password        TEXT,
+        status          TEXT          DEFAULT 'active',
+        expo_push_token TEXT,
+        created_at      TIMESTAMPTZ   DEFAULT NOW(),
+        updated_at      TIMESTAMPTZ   DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS mobile_loan_requests (
+        id              UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+        customer_id     UUID          REFERENCES mobile_customers(id),
+        amount          NUMERIC,
+        interest_rate   NUMERIC,
+        term            INTEGER,
+        term_frequency  TEXT,
+        purpose         TEXT,
+        notes           TEXT,
+        status          TEXT          DEFAULT 'pending',
+        reviewer_notes  TEXT,
+        reviewed_by     TEXT,
+        reviewed_at     TIMESTAMPTZ,
+        disbursed_at    TIMESTAMPTZ,
+        created_at      TIMESTAMPTZ   DEFAULT NOW(),
+        updated_at      TIMESTAMPTZ   DEFAULT NOW()
+      )
+    `);
+    // Extra tracking columns this admin panel needs (manual entry, fee, branch)
+    //
+    // IMPORTANT: application_fee and admin_fees are TWO DIFFERENT THINGS:
+    //   - application_fee: set when the application is created/submitted
+    //     (the fee for applying — already collected from the customer)
+    //   - admin_fees: set ONLY at approval time, mirrors the regular loan
+    //     disbursement admin fee retained from the loan principal
+    await client.query(`ALTER TABLE mobile_loan_requests ADD COLUMN IF NOT EXISTS application_fee NUMERIC(18,2) NOT NULL DEFAULT 0`);
+    await client.query(`ALTER TABLE mobile_loan_requests ADD COLUMN IF NOT EXISTS admin_fees NUMERIC(18,2) NOT NULL DEFAULT 0`);
+    await client.query(`ALTER TABLE mobile_loan_requests ADD COLUMN IF NOT EXISTS source VARCHAR(10) NOT NULL DEFAULT 'mobile'`);
+    await client.query(`ALTER TABLE mobile_loan_requests ADD COLUMN IF NOT EXISTS created_by VARCHAR(100)`);
+    await client.query(`ALTER TABLE mobile_loan_requests ADD COLUMN IF NOT EXISTS branch_id VARCHAR(50) REFERENCES branches(id)`);
+    // Links a bridged mobile loan to the actual client/loan created in the main system on approval
+    await client.query(`ALTER TABLE mobile_loan_requests ADD COLUMN IF NOT EXISTS linked_client_id VARCHAR(50) REFERENCES clients(id)`);
+    await client.query(`ALTER TABLE mobile_loan_requests ADD COLUMN IF NOT EXISTS linked_loan_id VARCHAR(50) REFERENCES loans(id)`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS mobile_repayments (
+        id          UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+        loan_id     UUID          REFERENCES mobile_loan_requests(id),
+        customer_id UUID          REFERENCES mobile_customers(id),
+        amount      NUMERIC,
+        date        DATE,
+        method      TEXT,
+        reference   TEXT,
+        notes       TEXT,
+        created_at  TIMESTAMPTZ   DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS mobile_notifications (
+        id          UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+        customer_id UUID          REFERENCES mobile_customers(id),
+        title       TEXT,
+        body        TEXT,
+        type        TEXT,
+        read        BOOLEAN       DEFAULT FALSE,
+        created_at  TIMESTAMPTZ   DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS mobile_documents (
+        id          UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+        customer_id UUID          REFERENCES mobile_customers(id),
+        loan_id     UUID          REFERENCES mobile_loan_requests(id),
+        doc_type    TEXT,
+        filename    TEXT,
+        url         TEXT,
+        created_at  TIMESTAMPTZ   DEFAULT NOW()
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_mobile_loan_customer ON mobile_loan_requests(customer_id)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_mobile_loan_status ON mobile_loan_requests(status)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_mobile_repay_loan ON mobile_repayments(loan_id)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_mobile_notif_customer ON mobile_notifications(customer_id)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_mobile_doc_loan ON mobile_documents(loan_id)`);
+
     await client.query('COMMIT');
     console.log('✅  All tables ready.');
 

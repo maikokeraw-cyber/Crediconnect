@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Credinova v4.8 — Financial Solutions</title>
+<title>Credinova v4.9 — Financial Solutions</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
@@ -110,6 +110,9 @@ tbody td.primary{color:var(--text);font-weight:500}
 .badge-active{background:var(--green-dim);color:var(--green)}
 .badge-completed{background:var(--blue-dim);color:var(--blue)}
 .badge-defaulted{background:var(--red-dim);color:var(--red)}
+.badge-pending{background:var(--amber-dim);color:var(--amber)}
+.badge-approved{background:var(--blue-dim);color:var(--blue)}
+.badge-rejected{background:var(--red-dim);color:var(--red)}
 .role-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
 .role-badge.admin{background:var(--red-dim);color:var(--red)}
 .role-badge.loan_officer{background:var(--blue-dim);color:var(--blue)}
@@ -236,7 +239,7 @@ input::placeholder{color:var(--text3)}
   </div>
   <div id="appLayout">
     <nav id="sidebar">
-      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v4.8</div></div>
+      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v4.9</div></div>
       <div class="nav">
         <div class="nav-section">Overview</div>
         <div class="nav-item active" id="nav-dashboard" onclick="navigate('dashboard')" class="nav-item-admin-only"><span class="icon">📊</span>Dashboard</div>
@@ -245,6 +248,7 @@ input::placeholder{color:var(--text3)}
         <div class="nav-item" id="nav-loans" onclick="navigate('loans')"><span class="icon">💰</span>Loan Portfolio</div>
         <div class="nav-item" id="nav-duePayments" onclick="navigate('duePayments')" style="position:relative"><span class="icon">📅</span>Due Payments<span id="dueBadge" style="display:none;position:absolute;top:6px;right:10px;background:var(--red);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;text-align:center;line-height:18px;padding:0 4px">0</span></div>
         <div class="nav-item" id="nav-repayments" onclick="navigate('repayments')"><span class="icon">💳</span>Repayments</div>
+        <div class="nav-item" id="nav-mobileApps" onclick="navigate('mobileApps')" style="position:relative"><span class="icon">📱</span>Applications<span id="mobileAppsBadge" style="display:none;position:absolute;top:6px;right:10px;background:var(--red);color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;text-align:center;line-height:18px;padding:0 4px">0</span></div>
         <div class="nav-section nav-write">Expenses</div>
         <div class="nav-item nav-write" id="nav-expenses" onclick="navigate('expenses')"><span class="icon">🧾</span>Expenses</div>
         <div class="nav-section nav-admin">Analytics</div>
@@ -258,7 +262,7 @@ input::placeholder{color:var(--text3)}
         <div class="nav-item" id="nav-profile" onclick="navigate('profile')"><span class="icon">⚙️</span>My Profile</div>
       </div>
       <div style="padding:6px 14px 2px;text-align:right">
-        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:0.5px">v4.8</span>
+        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:0.5px">v4.9</span>
       </div>
       <div class="sidebar-user">
         <div class="sidebar-avatar" id="sbAvatar">?</div>
@@ -289,6 +293,7 @@ input::placeholder{color:var(--text3)}
           <div class="card"><div class="table-wrap"><table><thead><tr><th>Date</th><th>Client</th><th>Loan Ref</th><th>Paid</th><th>Balance After</th><th>Notes</th><th></th></tr></thead><tbody id="repayTbody"></tbody></table></div></div>
         </div>
         <div id="page-duePayments" class="page"><div id="duePaymentsContent"></div></div>
+        <div id="page-mobileApps" class="page"><div id="mobileAppsContent"></div></div>
         <div id="page-expenses" class="page"><div id="expContent"></div></div>
         <div id="page-financials" class="page"><div id="finContent"></div></div>
         <div id="page-reports" class="page"><div id="repContent"></div></div>
@@ -476,6 +481,60 @@ input::placeholder{color:var(--text3)}
     <div class="form-group"><label>Status</label><select id="fUAct"><option value="1">Active</option><option value="0">Inactive</option></select></div>
   </div></div>
   <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mUser')">Cancel</button><button class="btn btn-primary" onclick="saveUser()">Save User</button></div>
+</div></div>
+
+<!-- ═══════════════ Mobile Loan Applications ═══════════════ -->
+
+<!-- Add Application (manual entry) -->
+<div class="modal-backdrop" id="mAddMobileApp"><div class="modal modal-wide">
+  <div class="modal-header"><div class="modal-title">📱 New Loan Application</div><button class="modal-close" onclick="CM('mAddMobileApp')">×</button></div>
+  <div class="modal-body">
+
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <button type="button" id="mmaTabExisting" class="btn btn-primary" style="flex:1" onclick="setMobileAppCustomerTab('existing')">Existing Customer</button>
+      <button type="button" id="mmaTabNew" class="btn btn-ghost" style="flex:1" onclick="setMobileAppCustomerTab('new')">New Customer</button>
+    </div>
+
+    <div id="mmaCustomerSearchWrap">
+      <div class="form-group">
+        <label>Search by name or phone</label>
+        <input id="mmaCustomerSearch" placeholder="Start typing…" oninput="searchMobileCustomers()">
+      </div>
+      <div id="mmaCustomerResults" style="border:1px solid var(--border);border-radius:var(--radius-sm);max-height:160px;overflow-y:auto;margin-bottom:6px"></div>
+      <div id="mmaSelectedCustomer" style="display:none;align-items:center;justify-content:space-between;background:var(--green-dim);border:1px solid var(--green);border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:16px">
+        <span style="font-size:12.5px;color:var(--text)">✓ <span id="mmaSelectedCustomerName"></span></span>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="clearSelectedMobileCustomer()">✕ Change</button>
+      </div>
+    </div>
+
+    <div id="mmaNewCustomerFields" style="display:none" class="form-grid">
+      <div class="form-group"><label>Full Name *</label><input id="mmaNewName" placeholder="John Doe"></div>
+      <div class="form-group"><label>Phone *</label><input id="mmaNewPhone" placeholder="077 123 4567"></div>
+      <div class="form-group"><label>National ID</label><input id="mmaNewNationalId" placeholder="63-123456A78"></div>
+      <div class="form-group"><label>Email</label><input id="mmaNewEmail" type="email" placeholder="name@example.com"></div>
+    </div>
+
+    <div style="border-top:1px solid var(--border);margin:18px 0 16px;padding-top:16px" class="form-grid">
+      <div class="form-group"><label>Loan Amount *</label><input id="mmaAmount" type="number" min="0" step="0.01" placeholder="500.00"></div>
+      <div class="form-group"><label>Interest Rate (%) *</label><input id="mmaRate" type="number" min="0" step="0.01" placeholder="15"></div>
+      <div class="form-group"><label>Term *</label><input id="mmaTerm" type="number" min="1" step="1" placeholder="4"></div>
+      <div class="form-group"><label>Frequency *</label>
+        <select id="mmaFreq"><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly" selected>Monthly</option></select>
+      </div>
+      <div class="form-group"><label>Application Fee</label><input id="mmaFee" type="number" min="0" step="0.01" value="0"></div>
+      <div class="form-group" id="mmaBranchWrap" style="display:none"><label>Branch *</label><select id="mmaBranch"><option value="">— Select Branch —</option></select></div>
+      <div class="form-group full"><label>Purpose</label><input id="mmaPurpose" placeholder="Business, Agriculture…"></div>
+      <div class="form-group full"><label>Notes</label><textarea id="mmaNotes" placeholder="Additional notes…"></textarea></div>
+    </div>
+
+  </div>
+  <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mAddMobileApp')">Cancel</button><button class="btn btn-primary" id="mmaSaveBtn" onclick="saveMobileApp()">Save Application</button></div>
+</div></div>
+
+<!-- Application Detail / Approve / Reject -->
+<div class="modal-backdrop" id="mMobileAppDetail"><div class="modal modal-wide">
+  <div class="modal-header"><div class="modal-title">Loan Application</div><button class="modal-close" onclick="CM('mMobileAppDetail')">×</button></div>
+  <div class="modal-body"><div id="mobileAppDetailBody"></div></div>
 </div></div>
 
 <div id="toast"></div>
@@ -751,9 +810,15 @@ function addAudit(action, entity, entityId, detail){
 //  OFFLINE SEED
 // ================================================================
 async function seedAdmin(){
-  if (users.length === 0) {
+  // Seed default branch if none exist
+  if(branches.length===0){
+    const defaultBranch = {id:uid(), name:'Harare', active:true};
+    branches.push(defaultBranch);
+    lsSet(K.branches, branches);
+  }
+  if(users.length===0){
     const hash = await hashPwd('Admin@1234');
-    users.push({ id:uid(), username:'admin', fullName:'System Administrator', role:'admin', passwordHash:hash, active:true, createdAt:today() });
+    users.push({ id:uid(), username:'admin', fullName:'System Administrator', role:'super_admin', passwordHash:hash, active:true, branchId: branches[0]?.id||null, createdAt:today() });
     lsSet(K.users, users);
   }
 }
@@ -881,7 +946,7 @@ function updateStorageInfo(){
     ? `<span style="color:var(--green)">● Supabase PostgreSQL</span>`
     : `<span style="color:var(--amber)">● localStorage (offline)</span>`;
   const bLabel=isSuperAdmin()?(activeBranch?`Branch:${branches.find(b=>b.id===activeBranch)?.name||activeBranch.slice(-4)}`:'All'):(currentUser?.branchId?`Branch:${branches.find(b=>b.id===currentUser.branchId)?.name||'ID:'+currentUser.branchId.slice(-4)}`:'⚠️ No Branch');
-document.getElementById('storageInfo').innerHTML=`v4.8 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
+document.getElementById('storageInfo').innerHTML=`v4.9 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
 }
 
 // ================================================================
@@ -895,19 +960,20 @@ function navigate(page){
   document.getElementById('page-'+page)?.classList.add('active');
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   const ni=document.getElementById('nav-'+page); if(ni) ni.classList.add('active');
-  const titles={dashboard:'Dashboard',clients:'Client Management',loans:'Loan Portfolio',duePayments:'Due Payments',repayments:'Repayment Tracking',expenses:'Expenses',financials:'Financial Overview',reports:'Reports & Analytics',users:'User Management',audit:'Audit Log',backup:'Backup & Export',profile:'My Profile'};
+  const titles={dashboard:'Dashboard',clients:'Client Management',loans:'Loan Portfolio',duePayments:'Due Payments',repayments:'Repayment Tracking',mobileApps:'Applications',expenses:'Expenses',financials:'Financial Overview',reports:'Reports & Analytics',users:'User Management',audit:'Audit Log',backup:'Backup & Export',profile:'My Profile'};
   document.getElementById('pageTitle').textContent=titles[page]||page;
   const act=document.getElementById('topbarActions'); act.innerHTML='';
   if(page==='clients'&&can('write'))    act.innerHTML=`<button class="btn btn-primary" onclick="openAddClient()">＋ Add Client</button>`;
   if(page==='loans'&&can('write'))      act.innerHTML=`<button class="btn btn-primary" onclick="openAddLoan()">＋ New Loan</button>`;
   if(page==='repayments'&&can('write')) act.innerHTML=`<button class="btn btn-primary" onclick="openAddRepay()">＋ Record Payment</button>`;
+  if(page==='mobileApps'&&can('write')&&USE_DB) act.innerHTML=`<button class="btn btn-primary" onclick="openAddMobileApp()">＋ New Application</button>`;
   if(page==='expenses'&&can('write'))   act.innerHTML=`<button class="btn btn-danger" onclick="openAddExpense()">＋ Record Expense</button>`;
   if(page==='users'&&can('admin'))      act.innerHTML=`<button class="btn btn-primary" onclick="openAddUser()">＋ Add User</button>`;
-  const fns={dashboard:renderDashboard,clients:renderClients,loans:renderLoans,repayments:renderRepayments,duePayments:renderDuePayments,expenses:renderExpenses,financials:renderFinancials,reports:renderReports,users:renderUsers,audit:renderAudit,backup:renderBackup,profile:renderProfile};
+  const fns={dashboard:renderDashboard,clients:renderClients,loans:renderLoans,repayments:renderRepayments,duePayments:renderDuePayments,mobileApps:renderMobileApps,expenses:renderExpenses,financials:renderFinancials,reports:renderReports,users:renderUsers,audit:renderAudit,backup:renderBackup,profile:renderProfile};
   // Loan officer cannot see dashboard — redirect to clients
   if(page==='dashboard'&&currentUser?.role==='loan_officer'){ navigate('clients'); return; }
   // Refresh from DB on data pages so branch filter always applies
-  const refreshPages = ['dashboard','clients','loans','duePayments','repayments','expenses','financials','reports'];
+  const refreshPages = ['dashboard','clients','loans','duePayments','repayments','mobileApps','expenses','financials','reports'];
   if(USE_DB && refreshPages.includes(page)){
     loadData().then(()=>{ if(fns[page]) fns[page](); });
   } else {
@@ -1028,6 +1094,325 @@ function updateDueBadge(){
   if(badge){
     if(total>0){ badge.textContent=total; badge.style.display='block'; }
     else badge.style.display='none';
+  }
+}
+
+// ================================================================
+//  MOBILE LOAN APPLICATIONS
+// ================================================================
+let _mobileApps = [];
+let _mobileAppCustomerMode = 'existing'; // 'existing' | 'new'
+let _mobileAppSelectedCustomer = null;
+let _mmaSearchTimer = null;
+let _currentMobileAppId = null;
+
+async function renderMobileApps(){
+  const el = document.getElementById('mobileAppsContent');
+  if(!el) return;
+  if(!USE_DB){
+    el.innerHTML = `<div class="card" style="padding:40px;text-align:center;color:var(--text3)">Applications requires a live database connection.</div>`;
+    return;
+  }
+  el.innerHTML = `<div style="padding:40px;text-align:center;color:var(--text3)">Loading applications…</div>`;
+  try{
+    _mobileApps = await apiFetch('GET','/api/mobile-applications');
+  }catch(e){
+    el.innerHTML = `<div class="card" style="padding:40px;text-align:center;color:var(--red)">Error loading applications: ${e.message}</div>`;
+    return;
+  }
+  renderMobileAppsTable();
+}
+
+function renderMobileAppsTable(){
+  const el = document.getElementById('mobileAppsContent');
+  if(!el) return;
+  const filter = document.getElementById('mmaStatusFilter')?.value || '';
+  const search = (document.getElementById('mmaSearch')?.value||'').toLowerCase();
+  let rows = _mobileApps;
+  if(filter) rows = rows.filter(a=>a.status===filter);
+  if(search) rows = rows.filter(a=> (a.customerName||'').toLowerCase().includes(search) || (a.customerPhone||'').toLowerCase().includes(search));
+
+  const pendingCount = _mobileApps.filter(a=>a.status==='pending').length;
+
+  el.innerHTML = `
+    <div class="search-bar">
+      <input class="search-input" id="mmaSearch" placeholder="🔍  Search by name or phone…" oninput="renderMobileAppsTable()" value="${search?search.replace(/"/g,'&quot;'):''}">
+      <select class="search-input" style="max-width:190px" id="mmaStatusFilter" onchange="renderMobileAppsTable()">
+        <option value="">All Status</option>
+        <option value="pending"${filter==='pending'?' selected':''}>Pending${pendingCount?' ('+pendingCount+')':''}</option>
+        <option value="active"${filter==='active'?' selected':''}>Active</option>
+        <option value="rejected"${filter==='rejected'?' selected':''}>Rejected</option>
+        <option value="completed"${filter==='completed'?' selected':''}>Completed</option>
+        <option value="defaulted"${filter==='defaulted'?' selected':''}>Defaulted</option>
+      </select>
+    </div>
+    <div class="card"><div class="table-wrap"><table>
+      <thead><tr>
+        <th>Customer</th><th>Phone</th><th>Amount</th><th>Rate</th><th>Term</th><th>Purpose</th><th>Source</th><th>Status</th><th>Applied</th><th></th>
+      </tr></thead>
+      <tbody>${rows.length ? rows.map(a=>`
+        <tr onclick="openMobileAppDetail('${a.id}')">
+          <td class="primary"><div class="name-cell"><div class="avatar" style="background:${avatarColor(a.customerName)}">${initials(a.customerName)}</div>${a.customerName}</div></td>
+          <td>${a.customerPhone}</td>
+          <td style="font-family:'DM Mono',monospace;color:var(--green);font-weight:600">$${fmt(a.amount)}</td>
+          <td>${a.interestRate}%</td>
+          <td>${a.term} ${a.termFrequency}</td>
+          <td>${a.purpose||'—'}</td>
+          <td><span style="font-size:10px;padding:2px 7px;border-radius:8px;font-weight:600;${a.source==='manual'?'background:var(--purple-dim);color:var(--purple)':'background:var(--blue-dim);color:var(--blue)'}">${a.source==='manual'?'Manual':'Mobile App'}</span></td>
+          <td><span class="badge badge-${a.status}">${a.status}</span></td>
+          <td style="color:var(--text2);white-space:nowrap">${fmtDT(a.createdAt)}</td>
+          <td onclick="event.stopPropagation()"><button class="btn btn-ghost btn-sm" onclick="openMobileAppDetail('${a.id}')">View</button></td>
+        </tr>`).join('') : `<tr><td colspan="10" style="text-align:center;padding:30px;color:var(--text3)">No applications found</td></tr>`
+      }</tbody>
+    </table></div></div>`;
+
+  updateMobileAppsBadge();
+}
+
+function updateMobileAppsBadge(){
+  const badge = document.getElementById('mobileAppsBadge');
+  if(!badge) return;
+  const pending = _mobileApps.filter(a=>a.status==='pending').length;
+  if(pending>0){ badge.textContent=pending; badge.style.display='block'; }
+  else badge.style.display='none';
+}
+
+// ── Manual application creation ─────────────────────────────────
+function setMobileAppCustomerTab(mode){
+  _mobileAppCustomerMode = mode;
+  document.getElementById('mmaTabExisting').className = 'btn '+(mode==='existing'?'btn-primary':'btn-ghost');
+  document.getElementById('mmaTabNew').className = 'btn '+(mode==='new'?'btn-primary':'btn-ghost');
+  document.getElementById('mmaCustomerSearchWrap').style.display = mode==='existing' ? '' : 'none';
+  document.getElementById('mmaNewCustomerFields').style.display = mode==='new' ? '' : 'none';
+}
+
+function openAddMobileApp(){
+  if(!USE_DB){ toast('Applications requires a live database connection — not available offline.','error'); return; }
+  _mobileAppSelectedCustomer = null;
+  document.getElementById('mmaCustomerSearch').value='';
+  document.getElementById('mmaCustomerResults').innerHTML='';
+  document.getElementById('mmaSelectedCustomer').style.display='none';
+  ['mmaNewName','mmaNewPhone','mmaNewNationalId','mmaNewEmail','mmaAmount','mmaRate','mmaTerm','mmaPurpose','mmaNotes'].forEach(id=>{const e=document.getElementById(id); if(e) e.value='';});
+  document.getElementById('mmaFee').value='0';
+  document.getElementById('mmaFreq').value='monthly';
+  setMobileAppCustomerTab('existing');
+  const bWrap = document.getElementById('mmaBranchWrap');
+  if(isSuperAdmin() && bWrap){
+    document.getElementById('mmaBranch').innerHTML = '<option value="">— Select Branch —</option>' +
+      branches.filter(b=>b.active!==false).map(b=>`<option value="${b.id}"${b.id===activeBranch?' selected':''}>${b.name}</option>`).join('');
+    bWrap.style.display = '';
+  } else if(bWrap){
+    bWrap.style.display = 'none';
+  }
+  OM('mAddMobileApp');
+}
+
+function searchMobileCustomers(){
+  clearTimeout(_mmaSearchTimer);
+  const q = document.getElementById('mmaCustomerSearch').value.trim();
+  const box = document.getElementById('mmaCustomerResults');
+  if(q.length<2){ box.innerHTML=''; return; }
+  _mmaSearchTimer = setTimeout(async ()=>{
+    try{
+      const results = await apiFetch('GET', `/api/mobile-customers/search?q=${encodeURIComponent(q)}`);
+      if(!results.length){ box.innerHTML='<div style="padding:8px 10px;color:var(--text3);font-size:12px">No customers found</div>'; return; }
+      window._mmaSearchResults = results; // store for click lookup (avoids inline JSON escaping issues)
+      box.innerHTML = results.map((c,i)=>`<div onclick="selectMobileCustomer(${i})" style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:12px" onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background='transparent'"><strong>${c.name}</strong> — ${c.phone}</div>`).join('');
+    }catch(e){ box.innerHTML='<div style="padding:8px 10px;color:var(--red);font-size:12px">Search failed</div>'; }
+  }, 300);
+}
+
+function selectMobileCustomer(idx){
+  const c = (window._mmaSearchResults||[])[idx]; if(!c) return;
+  _mobileAppSelectedCustomer = c;
+  document.getElementById('mmaCustomerResults').innerHTML='';
+  document.getElementById('mmaCustomerSearch').value='';
+  document.getElementById('mmaSelectedCustomer').style.display='flex';
+  document.getElementById('mmaSelectedCustomerName').textContent = `${c.name} — ${c.phone}`;
+}
+
+function clearSelectedMobileCustomer(){
+  _mobileAppSelectedCustomer = null;
+  document.getElementById('mmaSelectedCustomer').style.display='none';
+}
+
+async function saveMobileApp(){
+  const amount  = parseFloat(document.getElementById('mmaAmount').value);
+  const rate    = parseFloat(document.getElementById('mmaRate').value);
+  const term    = parseInt(document.getElementById('mmaTerm').value);
+  const freq    = document.getElementById('mmaFreq').value;
+  const applicationFee = parseFloat(document.getElementById('mmaFee').value)||0;
+  const purpose = document.getElementById('mmaPurpose').value.trim();
+  const notes   = document.getElementById('mmaNotes').value.trim();
+  const branchId = isSuperAdmin() ? (document.getElementById('mmaBranch')?.value||activeBranch||null) : myBranchId();
+
+  if(!amount||!rate||!term){ toast('Please fill loan amount, rate and term','error'); return; }
+  if(applicationFee<0){ toast('Application fee cannot be negative','error'); return; }
+  if(isSuperAdmin() && !branchId){ toast('Please select a branch','error'); return; }
+
+  const payload = { amount, interestRate:rate, term, termFrequency:freq, purpose, notes, applicationFee, branchId };
+
+  if(_mobileAppCustomerMode==='existing'){
+    if(!_mobileAppSelectedCustomer){ toast('Please select an existing customer, or switch to New Customer','error'); return; }
+    payload.customerId = _mobileAppSelectedCustomer.id;
+  } else {
+    const name  = document.getElementById('mmaNewName').value.trim();
+    const phone = document.getElementById('mmaNewPhone').value.trim();
+    if(!name||!phone){ toast('Customer name and phone are required','error'); return; }
+    payload.newCustomer = {
+      name, phone,
+      nationalId: document.getElementById('mmaNewNationalId').value.trim(),
+      email: document.getElementById('mmaNewEmail').value.trim()
+    };
+  }
+
+  const btn = document.getElementById('mmaSaveBtn');
+  btn.disabled=true; btn.textContent='Saving…';
+  try{
+    await apiFetch('POST','/api/mobile-applications', payload);
+    CM('mAddMobileApp');
+    toast('Application created — awaiting approval','success');
+    renderMobileApps();
+  }catch(e){
+    toast('Error: '+e.message,'error');
+  }finally{
+    btn.disabled=false; btn.textContent='Save Application';
+  }
+}
+
+// ── Detail / Approve / Reject ───────────────────────────────────
+async function openMobileAppDetail(id){
+  if(!USE_DB){ toast('Applications requires a live database connection — not available offline.','error'); return; }
+  _currentMobileAppId = id;
+  const body = document.getElementById('mobileAppDetailBody');
+  body.innerHTML = `<div style="padding:30px;text-align:center;color:var(--text3)">Loading…</div>`;
+  OM('mMobileAppDetail');
+  let app;
+  try{
+    app = await apiFetch('GET', `/api/mobile-applications/${id}`);
+  }catch(e){
+    body.innerHTML = `<div style="padding:20px;text-align:center;color:var(--red)">Error: ${e.message}</div>`;
+    return;
+  }
+  const total = app.amount + (app.amount * app.interestRate/100);
+  const perPayment = total/app.term;
+  const isPending = app.status==='pending';
+
+  body.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="avatar" style="background:${avatarColor(app.customerName)};width:40px;height:40px;font-size:15px">${initials(app.customerName)}</div>
+        <div><div style="font-weight:600;font-size:15px">${app.customerName}</div><div style="font-size:12px;color:var(--text3)">${app.customerPhone}</div></div>
+      </div>
+      <span class="badge badge-${app.status}" style="font-size:12px">${app.status}</span>
+    </div>
+
+    <div class="detail-grid">
+      <div class="detail-item"><label>National ID</label><div class="val">${app.customerNationalId||'—'}</div></div>
+      <div class="detail-item"><label>Email</label><div class="val">${app.customerEmail||'—'}</div></div>
+      <div class="detail-item"><label>Loan Amount</label><div class="val" style="color:var(--green)">$${fmt(app.amount)}</div></div>
+      <div class="detail-item"><label>Interest Rate</label><div class="val">${app.interestRate}%</div></div>
+      <div class="detail-item"><label>Term</label><div class="val">${app.term} ${app.termFrequency} payments</div></div>
+      <div class="detail-item"><label>Per Payment</label><div class="val">$${fmt(perPayment)}</div></div>
+      <div class="detail-item"><label>Total Repayable</label><div class="val">$${fmt(total)}</div></div>
+      <div class="detail-item"><label>Application Fee</label><div class="val" style="color:var(--purple)">$${fmt(app.applicationFee)}</div></div>
+      <div class="detail-item"><label>Source</label><div class="val">${app.source==='manual'?('Manual entry'+(app.createdBy?' — '+app.createdBy:'')):'Mobile App'}</div></div>
+      <div class="detail-item full" style="grid-column:1/-1"><label>Purpose</label><div class="val">${app.purpose||'—'}</div></div>
+      <div class="detail-item"><label>Applied</label><div class="val">${fmtDT(app.createdAt)}</div></div>
+    </div>
+    ${app.notes?`<div class="detail-item" style="margin-bottom:16px"><label>Notes</label><div class="val" style="font-weight:400">${app.notes}</div></div>`:''}
+
+    ${(app.documents&&app.documents.length)?`
+    <div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--text3);font-weight:600;margin-bottom:8px">Documents</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px">
+      ${app.documents.map(d=>`<a href="${d.url}" target="_blank" rel="noopener" style="font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;color:var(--blue);text-decoration:none">📄 ${d.docType||'Document'} — ${d.filename||'file'}</a>`).join('')}
+    </div>`:''}
+
+    ${isPending && can('write') ? `
+    <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:4px">
+      <div style="background:rgba(74,141,245,0.08);border:1px solid var(--blue);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:14px;font-size:11.5px;color:var(--blue)">
+        Approving will create this as a real loan in the Loan Portfolio${app.source==='mobile'?' and add the customer as a client if not already one':''}.
+        ${app.applicationFee>0?` The application fee of $${fmt(app.applicationFee)} was already collected at intake — it is separate from the admin fee below.`:''}
+      </div>
+      <div class="form-group" id="mmaApproveBranchWrap" style="display:none"><label>Branch *</label><select id="mmaApproveBranch"></select></div>
+      <div class="form-group"><label>Start Date *</label><input id="mmaApproveDate" type="date"></div>
+      <div class="form-group"><label>Admin Fee <span style="font-size:10px;color:var(--text3)">(retained from disbursement — separate from application fee)</span></label><input id="mmaApproveFee" type="number" min="0" step="0.01" value="0"></div>
+      <div class="form-group"><label>Reviewer Notes (optional)</label><textarea id="mmaApproveNotes" rows="2" placeholder="Internal notes…"></textarea></div>
+      <button class="btn btn-success" style="width:100%;margin-top:6px" id="mmaApproveBtn" onclick="approveMobileApp('${app.id}')">✅ Approve &amp; Disburse</button>
+      <div class="form-group" style="margin-top:16px"><label>Rejection Reason (required to reject)</label><textarea id="mmaRejectReason" rows="2" placeholder="Why is this application being rejected?"></textarea></div>
+      <button class="btn btn-danger" style="width:100%" id="mmaRejectBtn" onclick="rejectMobileApp('${app.id}')">✕ Reject Application</button>
+    </div>` : `
+    <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:4px;font-size:12px;color:var(--text3)">
+      ${app.reviewedBy?`Reviewed by <strong style="color:var(--text2)">${app.reviewedBy}</strong> on ${fmtDT(app.reviewedAt)}`:'Not yet reviewed'}
+      ${app.reviewerNotes?`<div style="margin-top:6px">Notes: ${app.reviewerNotes}</div>`:''}
+      ${app.applicationFee>0?`<div style="margin-top:6px">Application Fee: <strong style="color:var(--purple)">$${fmt(app.applicationFee)}</strong></div>`:''}
+      ${app.status==='active'&&app.adminFees>0?`<div style="margin-top:6px">Admin Fee retained: <strong style="color:var(--gold2)">$${fmt(app.adminFees)}</strong></div>`:''}
+      ${app.linkedLoanId?`<div style="margin-top:10px"><button class="btn btn-blue btn-sm" onclick="viewLinkedLoan('${app.linkedLoanId}')">📂 View in Loan Portfolio</button></div>`:''}
+    </div>`}
+  `;
+
+  // Populate branch select + default start date for approval
+  if(isPending && can('write')){
+    const bWrap = document.getElementById('mmaApproveBranchWrap');
+    const bSel  = document.getElementById('mmaApproveBranch');
+    if(isSuperAdmin() && bWrap && bSel){
+      bSel.innerHTML = branches.filter(b=>b.active!==false).map(b=>`<option value="${b.id}"${b.id===(app.branchId||activeBranch)?' selected':''}>${b.name}</option>`).join('');
+      bWrap.style.display = '';
+    } else if(bWrap){
+      bWrap.style.display = 'none';
+    }
+    document.getElementById('mmaApproveDate').value = today();
+    setMaxDate('mmaApproveDate');
+  }
+}
+
+function viewLinkedLoan(loanId){
+  CM('mMobileAppDetail');
+  if(USE_DB){
+    loadData().then(()=>{ navigate('loans'); openLoanDetail(loanId); });
+  } else {
+    navigate('loans');
+    openLoanDetail(loanId);
+  }
+}
+
+async function approveMobileApp(id){
+  const fee = parseFloat(document.getElementById('mmaApproveFee').value)||0;
+  if(fee<0){ toast('Admin fee cannot be negative','error'); return; }
+  const startDate = document.getElementById('mmaApproveDate').value;
+  const dateErr = validateDate(startDate, 'Start date'); if(dateErr){ toast(dateErr,'error'); return; }
+  const notes = document.getElementById('mmaApproveNotes').value.trim();
+  const branchId = isSuperAdmin() ? (document.getElementById('mmaApproveBranch')?.value||activeBranch||null) : myBranchId();
+  if(isSuperAdmin() && !branchId){ toast('Please select a branch','error'); return; }
+  if(!isSuperAdmin() && !branchId){ toast('Cannot approve — your account has no branch assigned. Ask your Super Admin.','error'); return; }
+  const btn = document.getElementById('mmaApproveBtn');
+  btn.disabled=true; btn.textContent='Approving…';
+  try{
+    await apiFetch('PUT', `/api/mobile-applications/${id}/approve`, { adminFees:fee, startDate, reviewerNotes:notes, branchId });
+    CM('mMobileAppDetail');
+    toast('Application approved — loan created in Loan Portfolio','success');
+    renderMobileApps();
+  }catch(e){
+    toast('Error: '+e.message,'error');
+    btn.disabled=false; btn.textContent='✅ Approve & Disburse';
+  }
+}
+
+
+async function rejectMobileApp(id){
+  const reason = document.getElementById('mmaRejectReason').value.trim();
+  if(!reason){ toast('Please provide a rejection reason','error'); return; }
+  if(!confirm('Reject this application? The customer will be notified.')) return;
+  const btn = document.getElementById('mmaRejectBtn');
+  btn.disabled=true; btn.textContent='Rejecting…';
+  try{
+    await apiFetch('PUT', `/api/mobile-applications/${id}/reject`, { reason });
+    CM('mMobileAppDetail');
+    toast('Application rejected','success');
+    renderMobileApps();
+  }catch(e){
+    toast('Error: '+e.message,'error');
+    btn.disabled=false; btn.textContent='✕ Reject Application';
   }
 }
 

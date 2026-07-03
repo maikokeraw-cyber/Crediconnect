@@ -705,6 +705,289 @@ app.get('/api/audit', requireAuth, requireDB, requireRole('admin'), async (req, 
 });
 
 // ================================================================
+//  MOBILE LOAN APPLICATIONS
+//  Reads/writes the mobile_* tables populated by the customer-facing
+//  mobile app. Applications can ALSO be created manually here by staff
+//  (e.g. walk-in customers without the app) — tracked via `source`.
+// ================================================================
+const mapMobileApp = r => ({
+  id: r.id,
+  customerId: r.customer_id,
+  customerName: r.customer_name,
+  customerPhone: r.customer_phone,
+  customerNationalId: r.customer_national_id || '',
+  customerEmail: r.customer_email || '',
+  amount: Number(r.amount),
+  interestRate: Number(r.interest_rate),
+  term: Number(r.term),
+  termFrequency: r.term_frequency || 'monthly',
+  purpose: r.purpose || '',
+  notes: r.notes || '',
+  status: r.status,
+  reviewerNotes: r.reviewer_notes || '',
+  reviewedBy: r.reviewed_by || '',
+  reviewedAt: r.reviewed_at ? r.reviewed_at.toISOString() : '',
+  disbursedAt: r.disbursed_at ? r.disbursed_at.toISOString() : '',
+  applicationFee: Number(r.application_fee || 0), // fee collected at intake
+  adminFees: Number(r.admin_fees || 0),            // real disbursement fee — set at approval
+  source: r.source || 'mobile',
+  createdBy: r.created_by || '',
+  branchId: r.branch_id || '',
+  linkedClientId: r.linked_client_id || '',
+  linkedLoanId: r.linked_loan_id || '',
+  createdAt: r.created_at ? r.created_at.toISOString() : ''
+});
+
+const MOBILE_APP_JOIN = `
+  SELECT l.*, c.name AS customer_name, c.phone AS customer_phone,
+         c.national_id AS customer_national_id, c.email AS customer_email,
+         c.expo_push_token AS customer_push_token
+  FROM mobile_loan_requests l
+  JOIN mobile_customers c ON c.id = l.customer_id
+`;
+
+// List all applications — pending shown first
+app.get('/api/mobile-applications', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
+  try {
+    const { status } = req.query;
+    let sql = MOBILE_APP_JOIN;
+    const params = [];
+    if (status) { params.push(status); sql += ` WHERE l.status = $${params.length}`; }
+    sql += ` ORDER BY CASE l.status WHEN 'pending' THEN 0 ELSE 1 END, l.created_at DESC`;
+    const { rows } = await pool.query(sql, params);
+    res.json(rows.map(mapMobileApp));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Single application detail, with documents
+app.get('/api/mobile-applications/:id', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
+  try {
+    const { rows } = await pool.query(MOBILE_APP_JOIN + ' WHERE l.id = $1', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Application not found' });
+    const app_ = mapMobileApp(rows[0]);
+    const { rows: docs } = await pool.query(
+      'SELECT id, doc_type, filename, url FROM mobile_documents WHERE loan_id = $1 ORDER BY created_at DESC',
+      [req.params.id]
+    );
+    app_.documents = docs.map(d => ({ id:d.id, docType:d.doc_type, filename:d.filename, url:d.url }));
+    res.json(app_);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Search mobile customers (for manual application creation)
+app.get('/api/mobile-customers/search', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (q.length < 2) return res.json([]);
+    const { rows } = await pool.query(
+      `SELECT id, name, phone, national_id, email FROM mobile_customers
+       WHERE name ILIKE $1 OR phone ILIKE $1 LIMIT 10`,
+      [`%${q}%`]
+    );
+    res.json(rows.map(c => ({ id:c.id, name:c.name, phone:c.phone, nationalId:c.national_id||'', email:c.email||'' })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Create a manual application (existing or brand-new customer)
+app.post('/api/mobile-applications', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { customerId, newCustomer, amount, interestRate, term, termFrequency, purpose, notes, applicationFee, branchId } = req.body;
+    if (!amount || !interestRate || !term) return res.status(400).json({ error: 'Loan amount, rate and term are required' });
+    if (!customerId && !newCustomer) return res.status(400).json({ error: 'A customer must be selected or created' });
+
+    await client.query('BEGIN');
+
+    let custId = customerId;
+    if (!custId && newCustomer) {
+      if (!newCustomer.name || !newCustomer.phone) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'New customer name and phone are required' });
+      }
+      // Reuse existing customer if phone already registered
+      const existing = await client.query('SELECT id FROM mobile_customers WHERE phone = $1', [newCustomer.phone]);
+      if (existing.rows.length) {
+        custId = existing.rows[0].id;
+      } else {
+        const ins = await client.query(
+          `INSERT INTO mobile_customers (name, phone, national_id, email, status)
+           VALUES ($1,$2,$3,$4,'active') RETURNING id`,
+          [newCustomer.name, newCustomer.phone, newCustomer.nationalId || null, newCustomer.email || null]
+        );
+        custId = ins.rows[0].id;
+      }
+    }
+
+    const ins = await client.query(
+      `INSERT INTO mobile_loan_requests
+        (customer_id, amount, interest_rate, term, term_frequency, purpose, notes, status, application_fee, source, created_by, branch_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8,'manual',$9,$10) RETURNING id`,
+      [custId, amount, interestRate, term, termFrequency || 'monthly', purpose || null, notes || null, applicationFee || 0, req.user.username, branchId || null]
+    );
+
+    await client.query('COMMIT');
+    await audit(req.user.id, req.user.username, 'ADD_MOBILE_LOAN', 'MobileLoan', ins.rows[0].id, `$${amount} application created manually`, branchId);
+
+    const { rows } = await pool.query(MOBILE_APP_JOIN + ' WHERE l.id = $1', [ins.rows[0].id]);
+    res.status(201).json(mapMobileApp(rows[0]));
+  } catch (err) {
+    await client.query('ROLLBACK').catch(()=>{});
+    res.status(500).json({ error: err.message });
+  } finally { client.release(); }
+});
+
+// Approve — bridges the application into the MAIN system:
+//   1. Finds or creates a client in `clients` (matched by phone)
+//   2. Creates a real loan in `loans` (so it appears in Loan Portfolio,
+//      Due Payments, Repayments, PAR30 — everything), using the chosen
+//      start date — NOT the application_fee paid at intake.
+//   3. Records the ADMIN fee (separate from application_fee) into
+//      `admin_fee_payments` (counts in Financials), same as a normal disbursement
+//   4. Notifies the customer in-app
+app.put('/api/mobile-applications/:id/approve', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
+  const conn = await pool.connect();
+  let clientId, loanId, isNewClient, branchId, fee, startDate, appRow;
+  try {
+    const { adminFees, startDate: reqStartDate, reviewerNotes, branchId: reqBranchId } = req.body;
+    const id = req.params.id;
+
+    const { rows: existing } = await pool.query(MOBILE_APP_JOIN + ' WHERE l.id = $1', [id]);
+    if (!existing.length) return res.status(404).json({ error: 'Application not found' });
+    appRow = existing[0];
+    if (appRow.status !== 'pending') return res.status(400).json({ error: 'This application has already been reviewed' });
+
+    fee = Number(adminFees) || 0;
+    if (fee < 0) return res.status(400).json({ error: 'Admin fee cannot be negative' });
+
+    startDate = reqStartDate;
+    if (!startDate) return res.status(400).json({ error: 'A start date is required' });
+    const todayStr = new Date().toISOString().slice(0,10);
+    if (startDate > todayStr) return res.status(400).json({ error: 'Start date cannot be in the future' });
+
+    // Branch: explicit choice from the approval form > application's own branch > admin's own branch
+    branchId = reqBranchId || appRow.branch_id || req.user.branchId || req.user.branch_id || null;
+    if (!branchId) return res.status(400).json({ error: 'A branch must be selected before approving' });
+
+    await conn.query('BEGIN');
+
+    // 1. Find or create the client (match by phone — the natural real-world identity key)
+    const { rows: existingClient } = await conn.query('SELECT id FROM clients WHERE phone = $1 LIMIT 1', [appRow.customer_phone]);
+    isNewClient = existingClient.length === 0;
+    clientId = isNewClient ? uuidv4() : existingClient[0].id;
+    if (isNewClient) {
+      await conn.query(
+        `INSERT INTO clients (id,name,phone,national_id,email,date_added,branch_id,added_by)
+         VALUES ($1,$2,$3,$4,$5,CURRENT_DATE,$6,$7)`,
+        [clientId, appRow.customer_name, appRow.customer_phone, appRow.customer_national_id || null, appRow.customer_email || null, branchId, req.user.id]
+      );
+    }
+
+    // 2. Create the real loan — uses the chosen start date
+    loanId = uuidv4();
+    const adminFeesStatus = fee > 0 ? 'paid' : 'none';
+    await conn.query(
+      `INSERT INTO loans (id,client_id,amount,interest_rate,term,term_frequency,start_date,purpose,notes,admin_fees,admin_fees_status,branch_id,added_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [loanId, clientId, appRow.amount, appRow.interest_rate, appRow.term, appRow.term_frequency || 'monthly',
+       startDate, appRow.purpose || null, appRow.notes || null, fee, adminFeesStatus, branchId, req.user.id]
+    );
+
+    // 3. Record the ADMIN fee (disbursement fee) so it counts in Financials —
+    //    this is separate from the application_fee already collected at intake
+    if (fee > 0) {
+      await conn.query(
+        `INSERT INTO admin_fee_payments (id,loan_id,amount,date,notes,added_by) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [uuidv4(), loanId, fee, startDate, `Admin fee — ${appRow.customer_name} (Mobile App disbursement)`, req.user.id]
+      );
+    }
+
+    // 4. Update the mobile application — mark active, link to the real client/loan
+    await conn.query(
+      `UPDATE mobile_loan_requests
+       SET status='active', reviewed_by=$1, reviewed_at=NOW(), disbursed_at=NOW(),
+           admin_fees=$2, reviewer_notes=COALESCE($3, reviewer_notes), branch_id=$4,
+           linked_client_id=$5, linked_loan_id=$6, updated_at=NOW()
+       WHERE id=$7`,
+      [req.user.username, fee, reviewerNotes || null, branchId, clientId, loanId, id]
+    );
+
+    // 5. In-app notification for the customer
+    await conn.query(
+      `INSERT INTO mobile_notifications (customer_id,title,body,type) VALUES ($1,$2,$3,'loan_approved')`,
+      [appRow.customer_id, '🎉 Loan Approved!', `Your loan of $${Number(appRow.amount).toFixed(2)} has been approved. Funds will be disbursed shortly.`]
+    );
+
+    await conn.query('COMMIT');
+  } catch (err) {
+    await conn.query('ROLLBACK').catch(()=>{});
+    return res.status(500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+
+  // Audit AFTER a successful commit — so the trail only reflects what actually happened
+  if (isNewClient) {
+    await audit(req.user.id, req.user.username, 'ADD_CLIENT', 'Client', clientId, `${appRow.customer_name} — added via Mobile App approval`, branchId);
+  }
+  await audit(req.user.id, req.user.username, 'DISBURSE_LOAN', 'Loan', loanId, `${appRow.customer_name} — $${Number(appRow.amount).toFixed(2)} — approved from Mobile App (start ${startDate})`, branchId);
+  await audit(req.user.id, req.user.username, 'APPROVE_MOBILE_LOAN', 'MobileLoan', req.params.id,
+    `$${Number(appRow.amount).toFixed(2)} approved — admin fee $${fee.toFixed(2)}${isNewClient?' — new client created':' — linked to existing client'}`, branchId);
+
+  // TODO Phase 2: call sendExpoPushNotification(appRow.customer_push_token, title, body) here
+
+  try {
+    const { rows } = await pool.query(MOBILE_APP_JOIN + ' WHERE l.id = $1', [req.params.id]);
+    res.json(mapMobileApp(rows[0]));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Reject — requires a reason, notifies customer
+app.put('/api/mobile-applications/:id/reject', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
+  try {
+    const { reason } = req.body;
+    if (!reason || !reason.trim()) return res.status(400).json({ error: 'A rejection reason is required' });
+    const id = req.params.id;
+    const { rows: existing } = await pool.query('SELECT * FROM mobile_loan_requests WHERE id = $1', [id]);
+    if (!existing.length) return res.status(404).json({ error: 'Application not found' });
+    if (existing[0].status !== 'pending') return res.status(400).json({ error: 'This application has already been reviewed' });
+
+    await pool.query(
+      `UPDATE mobile_loan_requests
+       SET status='rejected', reviewed_by=$1, reviewed_at=NOW(), reviewer_notes=$2, updated_at=NOW()
+       WHERE id=$3`,
+      [req.user.username, reason.trim(), id]
+    );
+
+    await pool.query(
+      `INSERT INTO mobile_notifications (customer_id, title, body, type)
+       VALUES ($1,$2,$3,'loan_rejected')`,
+      [existing[0].customer_id, 'Loan Application Update', `Your loan application was not approved. Reason: ${reason.trim()}`]
+    );
+
+    // TODO Phase 2: call sendExpoPushNotification(customer.expo_push_token, title, body) here
+
+    await audit(req.user.id, req.user.username, 'REJECT_MOBILE_LOAN', 'MobileLoan', id, `Rejected — ${reason.trim()}`, existing[0].branch_id);
+
+    const { rows } = await pool.query(MOBILE_APP_JOIN + ' WHERE l.id = $1', [id]);
+    res.json(mapMobileApp(rows[0]));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Delete — only safe for pending/rejected test or duplicate entries
+app.delete('/api/mobile-applications/:id', requireAuth, requireDB, requireRole('admin'), async (req, res) => {
+  try {
+    const { rows: existing } = await pool.query('SELECT status FROM mobile_loan_requests WHERE id = $1', [req.params.id]);
+    if (!existing.length) return res.status(404).json({ error: 'Application not found' });
+    if (!['pending','rejected'].includes(existing[0].status)) {
+      return res.status(400).json({ error: 'Only pending or rejected applications can be deleted' });
+    }
+    await pool.query('DELETE FROM mobile_loan_requests WHERE id = $1', [req.params.id]);
+    await audit(req.user.id, req.user.username, 'DELETE_MOBILE_LOAN', 'MobileLoan', req.params.id, 'Deleted');
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ================================================================
 //  CRON — Daily auto-penalty (called by external cron at 8am ZW)
 //  Secured with CRON_SECRET env variable
 // ================================================================
