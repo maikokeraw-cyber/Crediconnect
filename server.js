@@ -816,19 +816,28 @@ app.post('/api/mobile-applications', requireAuth, requireDB, requireRole('admin'
         custId = ins.rows[0].id;
       }
     }
-    // If a main-system client was selected (source='client'), create them in mobile_customers
-    if (custId && req.body.customerSource === 'client') {
-      const ex = await conn.query('SELECT id FROM mobile_customers WHERE phone=(SELECT phone FROM clients WHERE id=$1)', [custId]);
+    // If a main-system client was selected (source='client'), we need a mobile_customers record
+    if (req.body.customerSource === 'client') {
+      // Look up the client from main system first
+      const cl = await conn.query('SELECT name,phone,national_id,email FROM clients WHERE id=$1',[custId]);
+      if (!cl.rows.length) { await conn.query('ROLLBACK'); return res.status(400).json({ error: 'Client not found in main system' }); }
+      const client = cl.rows[0];
+      // Check if already in mobile_customers by phone
+      const ex = await conn.query('SELECT id FROM mobile_customers WHERE phone=$1',[client.phone]);
       if (ex.rows.length) {
-        custId = ex.rows[0].id; // already exists in mobile_customers
+        custId = ex.rows[0].id;
       } else {
-        const cl = await conn.query('SELECT name,phone,national_id,email FROM clients WHERE id=$1',[custId]);
-        if (cl.rows.length) {
-          const ins = await conn.query(`INSERT INTO mobile_customers (name,phone,national_id,email,status) VALUES ($1,$2,$3,$4,'active') RETURNING id`,[cl.rows[0].name,cl.rows[0].phone,cl.rows[0].national_id||null,cl.rows[0].email||null]);
-          custId = ins.rows[0].id;
-        }
+        // Create in mobile_customers
+        const mc = await conn.query(
+          `INSERT INTO mobile_customers (name,phone,national_id,email,status) VALUES ($1,$2,$3,$4,'active') RETURNING id`,
+          [client.name, client.phone, client.national_id||null, client.email||null]
+        );
+        custId = mc.rows[0].id;
       }
     }
+    // Verify we have a valid mobile_customers id before inserting
+    const custCheck = await conn.query('SELECT id FROM mobile_customers WHERE id=$1',[custId]);
+    if (!custCheck.rows.length) { await conn.query('ROLLBACK'); return res.status(400).json({ error: 'Could not resolve customer. Please try searching again.' }); }
     const ins = await conn.query(`INSERT INTO mobile_loan_requests (customer_id,amount,interest_rate,term,term_frequency,purpose,notes,status,application_fee,source,created_by,branch_id) VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8,'manual',$9,$10) RETURNING id`,
       [custId,amount,interestRate,term,termFrequency||'monthly',purpose||null,notes||null,applicationFee||0,req.user.username,branchId||null]);
     await conn.query('COMMIT');
