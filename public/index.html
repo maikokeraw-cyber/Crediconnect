@@ -866,6 +866,11 @@ async function deleteAdminFeePayment(id) {
 //  HELPERS
 // ================================================================
 function uid(){ return Math.random().toString(36).slice(2,10)+Date.now().toString(36); }
+
+// ── Data normalisers — handle both camelCase (already mapped) and snake_case (raw DB rows)
+function normaliseClient(c){ return { id:c.id, name:c.name||'', phone:c.phone||'', nationalId:c.nationalId||c.national_id||'', email:c.email||'', address:c.address||'', occupation:c.occupation||'', dob:(c.dob||'').slice(0,10), dateAdded:(c.dateAdded||c.date_added||'').slice(0,10), branchId:c.branchId||c.branch_id||'', addedBy:c.addedBy||c.added_by||'' }; }
+function normaliseRepayment(r){ return { id:r.id, loanId:r.loanId||r.loan_id||'', clientId:r.clientId||r.client_id||'', amount:Number(r.amount||0), date:(r.date||'').slice(0,10), notes:r.notes||'', addedBy:r.addedBy||r.added_by||'' }; }
+function normaliseExpense(e){ return { id:e.id, amount:Number(e.amount||0), category:e.category||'', description:e.description||'', date:(e.date||'').slice(0,10), addedBy:e.addedBy||e.added_by||'', branchId:e.branchId||e.branch_id||'' }; }
 function today(){ return new Date().toISOString().slice(0,10); }
 // Zimbabwe = UTC+2, no daylight saving — use for all due date calculations
 function todayZW(){
