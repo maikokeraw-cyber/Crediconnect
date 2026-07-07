@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Credinova v4.9 — Financial Solutions</title>
+<title>Credinova v5.0 — Financial Solutions</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
@@ -113,6 +113,9 @@ tbody td.primary{color:var(--text);font-weight:500}
 .badge-pending{background:var(--amber-dim);color:var(--amber)}
 .badge-approved{background:var(--blue-dim);color:var(--blue)}
 .badge-rejected{background:var(--red-dim);color:var(--red)}
+.phone-input-wrap{display:flex;gap:4px;align-items:stretch}
+.phone-input-wrap select{width:90px;flex-shrink:0;font-size:13px;padding:0 6px}
+.phone-input-wrap input{flex:1;min-width:0}
 .role-badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
 .role-badge.admin{background:var(--red-dim);color:var(--red)}
 .role-badge.loan_officer{background:var(--blue-dim);color:var(--blue)}
@@ -239,7 +242,7 @@ input::placeholder{color:var(--text3)}
   </div>
   <div id="appLayout">
     <nav id="sidebar">
-      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v4.9</div></div>
+      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v5.0</div></div>
       <div class="nav">
         <div class="nav-section">Overview</div>
         <div class="nav-item active" id="nav-dashboard" onclick="navigate('dashboard')" class="nav-item-admin-only"><span class="icon">📊</span>Dashboard</div>
@@ -262,7 +265,7 @@ input::placeholder{color:var(--text3)}
         <div class="nav-item" id="nav-profile" onclick="navigate('profile')"><span class="icon">⚙️</span>My Profile</div>
       </div>
       <div style="padding:6px 14px 2px;text-align:right">
-        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:0.5px">v4.9</span>
+        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:0.5px">v5.0</span>
       </div>
       <div class="sidebar-user">
         <div class="sidebar-avatar" id="sbAvatar">?</div>
@@ -311,7 +314,22 @@ input::placeholder{color:var(--text3)}
   <div class="modal-header"><div class="modal-title">Add New Client</div><button class="modal-close" onclick="CM('mAddClient')">×</button></div>
   <div class="modal-body"><div class="form-grid">
     <div class="form-group"><label>Full Name *</label><input id="fCN" placeholder="John Doe"></div>
-    <div class="form-group"><label>Phone *</label><input id="fCP" placeholder="+263 77 123 4567"></div>
+    <div class="form-group"><label>Phone *</label>
+      <div class="phone-input-wrap">
+        <select id="fCC1"><option value="+263">🇿🇼 +263</option><option value="+971">🇦🇪 +971</option></select>
+        <input id="fCP" placeholder="771234567" type="tel">
+      </div>
+    </div>
+    <div class="form-group" id="fPhone2Wrap" style="display:none"><label>Second Phone</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <div class="phone-input-wrap" style="flex:1">
+          <select id="fCC2"><option value="+263">🇿🇼 +263</option><option value="+971">🇦🇪 +971</option></select>
+          <input id="fCP2" placeholder="771234567" type="tel">
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('fPhone2Wrap').style.display='none';document.getElementById('fCP2').value=''">✕</button>
+      </div>
+    </div>
+    <div id="fPhone2Toggle"><button type="button" class="btn btn-ghost btn-sm" style="margin-bottom:8px" onclick="document.getElementById('fPhone2Wrap').style.display='';document.getElementById('fPhone2Toggle').style.display='none'">＋ Add second number</button></div>
     <div class="form-group"><label>National ID</label><input id="fCI" placeholder="ID Number"></div>
     <div class="form-group"><label>Email</label><input id="fCE" type="email" placeholder="email@example.com"></div>
     <div class="form-group full"><label>Address</label><textarea id="fCA" placeholder="Full address…"></textarea></div>
@@ -342,7 +360,21 @@ input::placeholder{color:var(--text3)}
   <div class="modal-header"><div class="modal-title">Edit Client</div><button class="modal-close" onclick="CM('mEditClient')">×</button></div>
   <div class="modal-body"><div class="form-grid">
     <div class="form-group"><label>Full Name *</label><input id="eCN" placeholder="John Doe"></div>
-    <div class="form-group"><label>Phone *</label><input id="eCP" placeholder="+263 77 123 4567"></div>
+    <div class="form-group"><label>Phone *</label>
+      <div class="phone-input-wrap">
+        <select id="eCC1"><option value="+263">🇿🇼 +263</option><option value="+971">🇦🇪 +971</option></select>
+        <input id="eCP" placeholder="771234567" type="tel">
+      </div>
+    </div>
+    <div class="form-group" id="ePhone2Wrap"><label>Second Phone</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <div class="phone-input-wrap" style="flex:1">
+          <select id="eCC2"><option value="+263">🇿🇼 +263</option><option value="+971">🇦🇪 +971</option></select>
+          <input id="eCP2" placeholder="771234567 (optional)" type="tel">
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('eCP2').value='';document.getElementById('eCC2').value='+263'">✕ Clear</button>
+      </div>
+    </div>
     <div class="form-group"><label>National ID</label><input id="eCI" placeholder="ID Number"></div>
     <div class="form-group"><label>Email</label><input id="eCE" type="email" placeholder="email@example.com"></div>
     <div class="form-group full"><label>Address</label><textarea id="eCA" placeholder="Full address…"></textarea></div>
@@ -868,7 +900,7 @@ async function deleteAdminFeePayment(id) {
 function uid(){ return Math.random().toString(36).slice(2,10)+Date.now().toString(36); }
 
 // ── Data normalisers — handle both camelCase (already mapped) and snake_case (raw DB rows)
-function normaliseClient(c){ return { id:c.id, name:c.name||'', phone:c.phone||'', nationalId:c.nationalId||c.national_id||'', email:c.email||'', address:c.address||'', occupation:c.occupation||'', dob:(c.dob||'').slice(0,10), dateAdded:(c.dateAdded||c.date_added||'').slice(0,10), branchId:c.branchId||c.branch_id||'', addedBy:c.addedBy||c.added_by||'' }; }
+function normaliseClient(c){ return { id:c.id, name:c.name||'', phone:c.phone||'', phone2:c.phone2||c.phone_2||'', nationalId:c.nationalId||c.national_id||'', email:c.email||'', address:c.address||'', occupation:c.occupation||'', dob:(c.dob||'').slice(0,10), dateAdded:(c.dateAdded||c.date_added||'').slice(0,10), branchId:c.branchId||c.branch_id||'', addedBy:c.addedBy||c.added_by||'' }; }
 function normaliseLoan(l){ return { id:l.id, clientId:l.clientId||l.client_id||'', amount:Number(l.amount||0), interestRate:Number(l.interestRate||l.interest_rate||0), term:Number(l.term||0), termFrequency:l.termFrequency||l.term_frequency||'monthly', startDate:(l.startDate||l.start_date||'').slice(0,10), repaymentStartDate:(l.repaymentStartDate||l.repayment_start_date||'').slice(0,10), purpose:l.purpose||'', notes:l.notes||'', adminFees:Number(l.adminFees||l.admin_fees||0), adminFeesStatus:l.adminFeesStatus||l.admin_fees_status||'none', status:l.status||'active', addedBy:l.addedBy||l.added_by||'', branchId:l.branchId||l.branch_id||'' }; }
 function normaliseRepayment(r){ return { id:r.id, loanId:r.loanId||r.loan_id||'', clientId:r.clientId||r.client_id||'', amount:Number(r.amount||0), date:(r.date||'').slice(0,10), notes:r.notes||'', addedBy:r.addedBy||r.added_by||'' }; }
 function normaliseExpense(e){ return { id:e.id, amount:Number(e.amount||0), category:e.category||'', description:e.description||'', date:(e.date||'').slice(0,10), addedBy:e.addedBy||e.added_by||'', branchId:e.branchId||e.branch_id||'' }; }
@@ -940,7 +972,7 @@ function updateStorageInfo(){
     ? `<span style="color:var(--green)">● Supabase PostgreSQL</span>`
     : `<span style="color:var(--amber)">● localStorage (offline)</span>`;
   const bLabel=isSuperAdmin()?(activeBranch?`Branch:${branches.find(b=>b.id===activeBranch)?.name||activeBranch.slice(-4)}`:'All'):(currentUser?.branchId?`Branch:${branches.find(b=>b.id===currentUser.branchId)?.name||'ID:'+currentUser.branchId.slice(-4)}`:'⚠️ No Branch');
-document.getElementById('storageInfo').innerHTML=`v4.9 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
+document.getElementById('storageInfo').innerHTML=`v5.0 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
 }
 
 // ================================================================
@@ -1227,6 +1259,11 @@ async function saveMobileApp(){
   if(!amount||!rate||!term){toast('Please fill loan amount, rate and term','error');return;}
   if(applicationFee<0){toast('Application fee cannot be negative','error');return;}
   if(isSuperAdmin()&&!branchId){toast('Please select a branch','error');return;}
+  // Duplicate application hard block (Option A)
+  if(_mobileAppCustomerMode==='existing'&&_mobileAppSelectedCustomer){
+    const pendingDup=_mobileApps.find(a=>a.customerId===_mobileAppSelectedCustomer.id&&a.status==='pending');
+    if(pendingDup){toast('This customer already has a pending application — approve or reject it first','error');return;}
+  }
   const payload={amount,interestRate:rate,term,termFrequency:freq,purpose,notes,applicationFee,branchId};
   if(_mobileAppCustomerMode==='existing'){
     if(!_mobileAppSelectedCustomer){toast('Please select an existing customer, or switch to New Customer','error');return;}
@@ -1630,18 +1667,21 @@ function renderClients(){
 }
 
 function reviewClient(){
-  // Validate first
   const name=document.getElementById('fCN').value.trim();
-  const phone=document.getElementById('fCP').value.trim();
+  const phone=buildPhone('fCC1','fCP');
+  const phone2=buildPhone('fCC2','fCP2');
+  const nationalId=document.getElementById('fCI').value.trim();
   if(!name||!phone) return toast('Name and phone are required','error');
+  const dup=findDuplicateClient(phone,phone2,nationalId,null);
+  if(dup) return toast(`A client already exists with this phone or ID: ${dup.name} (${dup.phone})`,'error');
   const branchId=isSuperAdmin()?(document.getElementById('fClientBranch')?.value||activeBranch||null):myBranchId();
   if(isSuperAdmin()&&!branchId) return toast('Please select a branch for this client','error');
-  // Build summary
   const branch=branches.find(b=>b.id===branchId);
   const fields={
     'Full Name':name,
     'Phone':phone,
-    'National ID':document.getElementById('fCI').value.trim()||'—',
+    'Second Phone':phone2||'—',
+    'National ID':nationalId||'—',
     'Email':document.getElementById('fCE').value.trim()||'—',
     'Address':document.getElementById('fCA').value.trim()||'—',
     'Date of Birth':document.getElementById('fCD').value||'—',
@@ -1662,30 +1702,78 @@ function reviewClient(){
   // Keep mAddClient open so Go Back can return to it
   OM('mConfirmClient');
 }
+// ── Phone helpers ─────────────────────────────────────────────────────────────
+// Build full phone from country code selector + number field
+function buildPhone(ccId, numId){
+  const cc = document.getElementById(ccId)?.value||'+263';
+  const num = (document.getElementById(numId)?.value||'').replace(/[\s\-().]/g,'').replace(/^0+/,'');
+  return num ? cc+num : '';
+}
+// Normalise phone for duplicate comparison — strip non-digits, remove leading country prefix if any
+function normPhone(p){
+  if(!p) return '';
+  const d = p.replace(/\D/g,'');
+  if(d.startsWith('263')) return d.slice(3);
+  if(d.startsWith('971')) return d.slice(3);
+  if(d.startsWith('0'))   return d.slice(1);
+  return d;
+}
+// Split stored phone (e.g. "+263771234567") into {cc, num} for populating selectors
+function splitPhone(p){
+  if(!p) return {cc:'+263',num:''};
+  if(p.startsWith('+263')) return {cc:'+263',num:p.slice(4)};
+  if(p.startsWith('+971')) return {cc:'+971',num:p.slice(4)};
+  if(p.startsWith('0'))    return {cc:'+263',num:p.slice(1)};
+  return {cc:'+263',num:p};
+}
+// Check for duplicate client by phone or national ID (normalised)
+function findDuplicateClient(phone, phone2, nationalId, excludeId){
+  const np  = normPhone(phone);
+  const np2 = normPhone(phone2);
+  return clients.find(c => {
+    if(excludeId && c.id===excludeId) return false;
+    if(np  && normPhone(c.phone)===np)  return true;
+    if(np2 && normPhone(c.phone)===np2) return true;
+    if(c.phone2 && np  && normPhone(c.phone2)===np)  return true;
+    if(c.phone2 && np2 && normPhone(c.phone2)===np2) return true;
+    if(nationalId && nationalId.length>3 && c.nationalId && c.nationalId.toLowerCase()===nationalId.toLowerCase()) return true;
+    return false;
+  });
+}
 function openAddClient(){
-  ['fCN','fCP','fCI','fCE','fCA','fCD','fCO'].forEach(i=>{const el=document.getElementById(i);if(el)el.value='';});
-  // Super admin must choose a branch for new clients
-  const bWrap = document.getElementById('fClientBranchWrap');
-  const bSel  = document.getElementById('fClientBranch');
-  if(isSuperAdmin() && bWrap && bSel){
-    bSel.innerHTML = '<option value="">— Select Branch —</option>' +
-      branches.filter(b=>b.active!==false).map(b=>`<option value="${b.id}"${b.id===activeBranch?' selected':''}>${b.name}</option>`).join('');
-    bWrap.style.display = '';
-  } else if(bWrap){
-    bWrap.style.display = 'none';
-  }
+  document.getElementById('fCN').value='';
+  document.getElementById('fCP').value='';
+  document.getElementById('fCC1').value='+263';
+  document.getElementById('fCP2').value='';
+  document.getElementById('fCC2').value='+263';
+  document.getElementById('fPhone2Wrap').style.display='none';
+  document.getElementById('fPhone2Toggle').style.display='';
+  document.getElementById('fCI').value='';
+  document.getElementById('fCE').value='';
+  document.getElementById('fCA').value='';
+  document.getElementById('fCD').value='';
+  document.getElementById('fCO').value='';
+  const bWrap=document.getElementById('fClientBranchRow');
+  if(bWrap){bWrap.style.display=isSuperAdmin()?'':'none';}
+  if(isSuperAdmin()){const s=document.getElementById('fClientBranch');if(s)s.innerHTML='<option value="">— Select Branch —</option>'+branches.filter(b=>b.active!==false).map(b=>`<option value="${b.id}"${b.id===activeBranch?' selected':''}>${b.name}</option>`).join('');}
   OM('mAddClient');
 }
 function saveClient(){
-  const name=document.getElementById('fCN').value.trim(), phone=document.getElementById('fCP').value.trim();
+  const name=document.getElementById('fCN').value.trim();
+  const phone=buildPhone('fCC1','fCP');
+  const phone2=buildPhone('fCC2','fCP2');
+  const nationalId=document.getElementById('fCI').value.trim();
   if(!name||!phone) return toast('Name and phone are required','error');
+  // Duplicate check
+  const dup=findDuplicateClient(phone,phone2,nationalId,null);
+  if(dup) return toast(`A client already exists with this phone or ID: ${dup.name} (${dup.phone})`,'error');
   const _sb=lockModal('Adding…');
   // Determine branch — super admin picks from dropdown, others use their own branch
   const selectedBranch = document.getElementById('fClientBranch')?.value || null;
   const branchId = isSuperAdmin() ? (selectedBranch || activeBranch || null) : myBranchId();
   if(!branchId) return toast('Cannot add client — your account has no branch assigned. Ask your Super Admin to assign you to a branch.','error');
   if(isSuperAdmin() && !branchId) return toast('Please select a branch for this client','error');
-  const data={name,phone,nationalId:document.getElementById('fCI').value.trim(),email:document.getElementById('fCE').value.trim(),address:document.getElementById('fCA').value.trim(),occupation:document.getElementById('fCO').value.trim(),dob:document.getElementById('fCD').value||'',dateAdded:today(),branchId};
+  const data={name,phone,phone2:phone2||null,nationalId,email:document.getElementById('fCE').value.trim(),address:document.getElementById('fCA').value.trim(),occupation:document.getElementById('fCO').value.trim(),dob:document.getElementById('fCD').value||'',dateAdded:today(),branchId};
   addClient(data).then(()=>{
     addAudit('ADD_CLIENT','Client',data.id||'','Added '+name);
     CM('mConfirmClient');CM('mAddClient');renderClients();updateStorageInfo();toast(`Client "${name}" added`,'success');
@@ -1698,7 +1786,7 @@ function openClientDetail(id){
   const cl=clientLoans(c.id),tb=cl.reduce((s,l)=>s+l.amount,0),tp=cl.reduce((s,l)=>s+getLoanPaid(l.id),0);
   document.getElementById('cdBody').innerHTML=`
     <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px"><div class="avatar" style="background:${avatarColor(c.name)};width:56px;height:56px;font-size:22px">${initials(c.name)}</div>
-    <div><div style="font-size:18px;font-weight:600">${c.name}</div><div style="font-size:13px;color:var(--text2)">${c.phone}${c.email?' · '+c.email:''}</div><div style="font-size:12px;color:var(--text3)">${c.occupation||''}${c.address?' · '+c.address:''}</div></div></div>
+    <div><div style="font-size:18px;font-weight:600">${c.name}</div><div style="font-size:13px;color:var(--text2)">${c.phone}${c.phone2?' · '+c.phone2:''}${c.email?' · '+c.email:''}</div><div style="font-size:12px;color:var(--text3)">${c.occupation||''}${c.address?' · '+c.address:''}</div></div></div>
     <div class="detail-grid">
       <div class="detail-item"><label>National ID</label><div class="val">${c.nationalId||'—'}</div></div>
       <div class="detail-item"><label>DOB</label><div class="val">${c.dob?fmtDate(c.dob):'—'}</div></div>
@@ -1740,10 +1828,15 @@ let _editClientSnapshot={}; // captures old values at moment modal opens
 function openEditClient(id){
   const c=clients.find(c=>c.id===id);if(!c)return;
   _editClientId=id;
-  // Snapshot the current values BEFORE any edits — used for diff in audit log
-  _editClientSnapshot={name:c.name||'',phone:c.phone||'',nationalId:c.nationalId||'',email:c.email||'',address:c.address||'',occupation:c.occupation||'',dob:c.dob||''};
+  _editClientSnapshot={name:c.name||'',phone:c.phone||'',phone2:c.phone2||'',nationalId:c.nationalId||'',email:c.email||'',address:c.address||'',occupation:c.occupation||'',dob:c.dob||''};
   document.getElementById('eCN').value=c.name||'';
-  document.getElementById('eCP').value=c.phone||'';
+  // Split stored phone into country code + number
+  const p1=splitPhone(c.phone);
+  document.getElementById('eCC1').value=p1.cc;
+  document.getElementById('eCP').value=p1.num;
+  const p2=splitPhone(c.phone2||'');
+  document.getElementById('eCC2').value=p2.cc;
+  document.getElementById('eCP2').value=p2.num;
   document.getElementById('eCI').value=c.nationalId||'';
   document.getElementById('eCE').value=c.email||'';
   document.getElementById('eCA').value=c.address||'';
@@ -1752,13 +1845,18 @@ function openEditClient(id){
   OM('mEditClient');
 }
 async function saveEditClient(){
-  const name=document.getElementById('eCN').value.trim(),phone=document.getElementById('eCP').value.trim();
+  const name=document.getElementById('eCN').value.trim();
+  const phone=buildPhone('eCC1','eCP');
+  const phone2=buildPhone('eCC2','eCP2');
+  const nationalId=document.getElementById('eCI').value.trim();
   if(!name||!phone)return toast('Name and phone are required','error');
+  // Duplicate check — exclude current client
+  const dup=findDuplicateClient(phone,phone2,nationalId,_editClientId);
+  if(dup) return toast(`A client already exists with this phone or ID: ${dup.name} (${dup.phone})`,'error');
   const c=clients.find(c=>c.id===_editClientId);if(!c)return;
   const _sb=lockModal('Saving…');
-  const updated={...c,name,phone,nationalId:document.getElementById('eCI').value.trim(),email:document.getElementById('eCE').value.trim(),address:document.getElementById('eCA').value.trim(),occupation:document.getElementById('eCO').value.trim(),dob:document.getElementById('eCD').value||''};
-  // Diff against snapshot taken when modal opened — guarantees accurate before/after
-  const fields={name:'Name',phone:'Phone',nationalId:'National ID',email:'Email',address:'Address',occupation:'Occupation',dob:'Date of Birth'};
+  const updated={...c,name,phone,phone2:phone2||null,nationalId,email:document.getElementById('eCE').value.trim(),address:document.getElementById('eCA').value.trim(),occupation:document.getElementById('eCO').value.trim(),dob:document.getElementById('eCD').value||''};
+  const fields={name:'Name',phone:'Phone',phone2:'Second Phone',nationalId:'National ID',email:'Email',address:'Address',occupation:'Occupation',dob:'Date of Birth'};
   const old=_editClientSnapshot;
   const changes=Object.keys(fields).filter(k=>(old[k]||'')!==(updated[k]||'')).map(k=>`${fields[k]}: "${old[k]||'—'}" → "${updated[k]||'—'}"`);
   const detail=changes.length?changes.join(' | '):'No changes';
@@ -1888,6 +1986,13 @@ async function saveLoan(){
   const dateErr=validateDate(date,'Disbursement date'); if(dateErr){toast(dateErr,'error');return;}
   const cashToCustomer=amount-adminFees;
   if(cashToCustomer<0){toast('Admin fees cannot exceed the loan amount.','error');return;}
+  // Duplicate loan warning — Option B: warn but allow admin to override
+  const activeLoanForClient = loans.find(l=>l.clientId===clientId && (getLoanStatus(l)==='active'||getLoanStatus(l)==='defaulted'));
+  if(activeLoanForClient){
+    const c=clients.find(c=>c.id===clientId);
+    const proceed=confirm(`⚠️ ${c?c.name:'This client'} already has an active loan of $${fmt(activeLoanForClient.amount)} (${getLoanStatus(activeLoanForClient)}).\n\nAre you sure you want to disburse another loan?`);
+    if(!proceed) return;
+  }
   const repayStart=document.getElementById('fLRS')?.value||'';
   addLoan({clientId,amount,interestRate:rate,term,termFrequency:freq,startDate:date,repaymentStartDate:repayStart||null,purpose:document.getElementById('fLP').value.trim(),notes:document.getElementById('fLN').value.trim(),adminFees,adminFeesPaid:true,branchId:myBranchId()}).then(r=>{
     // Admin fee recorded immediately at disbursement

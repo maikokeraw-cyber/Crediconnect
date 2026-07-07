@@ -97,6 +97,7 @@ async function setup() {
     await client.query(`ALTER TABLE loans ADD COLUMN IF NOT EXISTS admin_fees NUMERIC(18,2) NOT NULL DEFAULT 0`);
     await client.query(`ALTER TABLE loans ADD COLUMN IF NOT EXISTS admin_fees_status VARCHAR(10) NOT NULL DEFAULT 'none'`);
     await client.query(`ALTER TABLE loans ADD COLUMN IF NOT EXISTS repayment_start_date DATE`);
+    await client.query(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS phone2 VARCHAR(20)`);
     await client.query(`ALTER TABLE loans ADD COLUMN IF NOT EXISTS branch_id VARCHAR(50) REFERENCES branches(id)`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_loans_client_id ON loans(client_id)`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_loans_status    ON loans(status)`);
@@ -166,6 +167,7 @@ async function setup() {
 
     // ── Mobile App Tables ─────────────────────────────────────────
     await client.query(`CREATE TABLE IF NOT EXISTS mobile_customers (id UUID PRIMARY KEY DEFAULT gen_random_uuid(),name TEXT,phone TEXT UNIQUE,national_id TEXT UNIQUE,email TEXT,password TEXT,status TEXT DEFAULT 'active',expo_push_token TEXT,created_at TIMESTAMPTZ DEFAULT NOW(),updated_at TIMESTAMPTZ DEFAULT NOW())`);
+    await client.query(`ALTER TABLE mobile_customers ADD COLUMN IF NOT EXISTS expo_push_token TEXT`);
     await client.query(`CREATE TABLE IF NOT EXISTS mobile_loan_requests (id UUID PRIMARY KEY DEFAULT gen_random_uuid(),customer_id UUID REFERENCES mobile_customers(id),amount NUMERIC,interest_rate NUMERIC,term INTEGER,term_frequency TEXT,purpose TEXT,notes TEXT,status TEXT DEFAULT 'pending',reviewer_notes TEXT,reviewed_by TEXT,reviewed_at TIMESTAMPTZ,disbursed_at TIMESTAMPTZ,created_at TIMESTAMPTZ DEFAULT NOW(),updated_at TIMESTAMPTZ DEFAULT NOW())`);
     await client.query(`ALTER TABLE mobile_loan_requests ADD COLUMN IF NOT EXISTS application_fee NUMERIC(18,2) NOT NULL DEFAULT 0`);
     await client.query(`ALTER TABLE mobile_loan_requests ADD COLUMN IF NOT EXISTS admin_fees NUMERIC(18,2) NOT NULL DEFAULT 0`);

@@ -143,7 +143,7 @@ async function audit(userId, username, action, entity, entityId, detail, branchI
 }
 
 // ── Row mappers ──────────────────────────────────────────────────
-const mapClient = r => ({ id:r.id, name:r.name, phone:r.phone, nationalId:r.national_id||'', email:r.email||'', address:r.address||'', occupation:r.occupation||'', dob:r.dob?r.dob.toISOString().slice(0,10):'', dateAdded:r.date_added?r.date_added.toISOString().slice(0,10):'', addedBy:r.added_by||'', branchId:r.branch_id||'' });
+const mapClient = r => ({ id:r.id, name:r.name, phone:r.phone, phone2:r.phone2||'', nationalId:r.national_id||'', email:r.email||'', address:r.address||'', occupation:r.occupation||'', dob:r.dob?r.dob.toISOString().slice(0,10):'', dateAdded:r.date_added?r.date_added.toISOString().slice(0,10):'', addedBy:r.added_by||'', branchId:r.branch_id||'' });
 const mapLoan = (r, totalPaid) => {
   const amount      = Number(r.amount);
   const rate        = Number(r.interest_rate);
@@ -336,15 +336,25 @@ app.get('/api/clients', requireAuth, requireDB, async (req, res) => {
 
 app.post('/api/clients', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
   try {
-    const { name, phone, nationalId, email, address, occupation, dob, dateAdded, branchId } = req.body;
+    const { name, phone, phone2, nationalId, email, address, occupation, dob, dateAdded, branchId } = req.body;
     if (!name || !phone) return res.status(400).json({ error: 'Name and phone required' });
+    // Server-side duplicate check — normalise phone for comparison
+    const normP = phone.replace(/\D/g,'').replace(/^(263|971|0)/,'');
+    const normP2 = phone2 ? phone2.replace(/\D/g,'').replace(/^(263|971|0)/,'') : null;
+    const { rows: dupRows } = await pool.query(
+      `SELECT id,name,phone FROM clients WHERE
+        regexp_replace(phone,'\\D','','g') ILIKE $1 OR
+        (national_id IS NOT NULL AND national_id<>'' AND national_id=COALESCE($2,''))
+        OR ($3::text IS NOT NULL AND regexp_replace(phone,'\\D','','g') ILIKE $3)`,
+      [`%${normP}`, nationalId||null, normP2?`%${normP2}`:null]
+    );
+    if (dupRows.length) return res.status(409).json({ error: `A client already exists with this phone or ID: ${dupRows[0].name} (${dupRows[0].phone})` });
     const id = uuidv4();
-    // Use provided branchId, or user's branch, or null for super_admin with no selection
     const clientBranch = branchId || req.user.branchId || req.user.branch_id || null;
     await pool.query(
-      `INSERT INTO clients (id,name,phone,national_id,email,address,occupation,dob,date_added,branch_id,added_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-      [id, name, phone, nationalId||null, email||null, address||null, occupation||null, dob||null, dateAdded||new Date(), clientBranch, req.user.id]
+      `INSERT INTO clients (id,name,phone,phone2,national_id,email,address,occupation,dob,date_added,branch_id,added_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [id, name, phone, phone2||null, nationalId||null, email||null, address||null, occupation||null, dob||null, dateAdded||new Date(), clientBranch, req.user.id]
     );
     await audit(req.user.id, req.user.username, 'ADD_CLIENT', 'Client', id, `Added ${name}`);
     const { rows } = await pool.query('SELECT * FROM clients WHERE id=$1', [id]);
@@ -362,11 +372,11 @@ app.delete('/api/clients/:id', requireAuth, requireDB, requireRole('admin'), asy
 
 app.put('/api/clients/:id', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
   try {
-    const { name, phone, nationalId, email, address, occupation, dob } = req.body;
+    const { name, phone, phone2, nationalId, email, address, occupation, dob } = req.body;
     if (!name || !phone) return res.status(400).json({ error: 'Name and phone required' });
     await pool.query(
-      `UPDATE clients SET name=$1,phone=$2,national_id=$3,email=$4,address=$5,occupation=$6,dob=$7,updated_at=NOW() WHERE id=$8`,
-      [name, phone, nationalId||null, email||null, address||null, occupation||null, dob||null, req.params.id]
+      `UPDATE clients SET name=$1,phone=$2,phone2=$3,national_id=$4,email=$5,address=$6,occupation=$7,dob=$8,updated_at=NOW() WHERE id=$9`,
+      [name, phone, phone2||null, nationalId||null, email||null, address||null, occupation||null, dob||null, req.params.id]
     );
     await audit(req.user.id, req.user.username, 'EDIT_CLIENT', 'Client', req.params.id, `Updated ${name}`);
     res.json({ success: true });
