@@ -1290,7 +1290,7 @@ async function openMobileAppDetail(id){
       </div>
       <div class="form-group" id="mmaApproveBranchWrap" style="display:none"><label>Branch *</label><select id="mmaApproveBranch"></select></div>
       <div class="form-group"><label>Start Date *</label><input id="mmaApproveDate" type="date"></div>
-      <div class="form-group"><label>Admin Fee <span style="font-size:10px;color:var(--text3)">(retained from disbursement — separate from application fee)</span></label><input id="mmaApproveFee" type="number" min="0" step="0.01" value="0"></div>
+      <div class="form-group"><label>Admin Fee *</label><input id="mmaApproveFee" type="number" min="0" step="0.01" value="0"></div>
       <div class="form-group"><label>Reviewer Notes (optional)</label><textarea id="mmaApproveNotes" rows="2" placeholder="Internal notes…"></textarea></div>
       <button class="btn btn-success" style="width:100%;margin-top:6px" id="mmaApproveBtn" onclick="approveMobileApp('${app.id}')">✅ Approve &amp; Disburse</button>
       <div class="form-group" style="margin-top:16px"><label>Rejection Reason (required to reject)</label><textarea id="mmaRejectReason" rows="2" placeholder="Why is this application being rejected?"></textarea></div>
