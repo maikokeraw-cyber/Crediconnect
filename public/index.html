@@ -1388,27 +1388,84 @@ async function rejectMobileApp(id){
   }catch(e){toast('Error: '+e.message,'error');btn.disabled=false;btn.textContent='✕ Reject Application';}
 }
 
+// Refresh only the overdue table body (penalty ✓ badges) without full re-render
+function _refreshOverdueTableBody(el, tzd){
+  const freq = document.getElementById('dueFreqFilter')?.value||'';
+  const overdueList=[];
+  loans.forEach(l=>{
+    if(getLoanStatus(l)==='completed') return;
+    if(freq && l.termFrequency!==freq) return;
+    if(!isLoanOverdue(l)) return;
+    const c=clients.find(c=>c.id===l.clientId);
+    const amort=buildAmortisation(l);
+    const bal=getLoanBalance(l.id);
+    const lastDue=amort.filter(r=>r.dueDate<tzd).pop();
+    if(!lastDue) return;
+    const daysOverdue=Math.floor((new Date(tzd)-new Date(lastDue.dueDate))/86400000);
+    const freqBadge=`<span style="font-size:9px;padding:1px 5px;border-radius:6px;font-weight:700;text-transform:uppercase;background:${l.termFrequency==='daily'?'rgba(74,141,245,0.15)':l.termFrequency==='weekly'?'rgba(39,201,122,0.15)':'rgba(240,168,50,0.15)'};color:${l.termFrequency==='daily'?'var(--blue)':l.termFrequency==='weekly'?'var(--green)':'var(--amber)'}">${l.termFrequency||'monthly'}</span>`;
+    overdueList.push({loan:l,client:c,row:lastDue,bal,daysOverdue,freqBadge});
+  });
+  // Re-use the same renderTable function — need to build it inline
+  const tzTomorrow=tomorrowZW();
+  const renderTable=(items,emptyMsg,showDays)=>{
+    if(!items.length) return `<div style="padding:20px;text-align:center;color:var(--text3)">${emptyMsg}</div>`;
+    return `<div class="table-wrap"><table><thead><tr><th>Client</th><th>Phone</th><th>Freq</th><th>Payment Due</th><th>Balance</th><th>Due Date</th>${showDays?'<th>Days Overdue</th>':''}${showDays?'<th style="color:var(--red)">Penalty</th>':''}<th></th></tr></thead><tbody>${items.map(({loan:l,client:c,row,bal,daysOverdue,freqBadge})=>{
+      const av=c?`<div class="name-cell"><div class="avatar" style="background:${avatarColor(c.name)};width:26px;height:26px;font-size:10px">${initials(c.name)}</div><span style="font-weight:500">${c.name}</span></div>`:'—';
+      const phone=c?.phone?`<a href="tel:${c.phone}" style="color:var(--text);font-family:'DM Mono',monospace;font-size:12px;text-decoration:none">${c.phone}</a>`:'—';
+      const daysStyle=daysOverdue>7?'color:var(--red);font-weight:700':daysOverdue>3?'color:var(--amber);font-weight:600':'color:var(--text2)';
+      let penaltyCell='';
+      if(showDays){
+        const periodicPay=getLoanTotal(l)/l.term;
+        const penaltyAmt=Math.round(periodicPay*getPenaltyRate(l)*10000)/10000;
+        const amort=buildAmortisation(l);
+        const pastDue=amort.filter(r=>r.dueDate<tzd);
+        const currentMissed=pastDue[pastDue.length-1];
+        const alreadyCharged=currentMissed&&adminFeePayments.some(af=>af.loanId===l.id&&(af.notes||'').includes(`Auto penalty period ${currentMissed.month}`));
+        penaltyCell=alreadyCharged?`<td style="font-family:'DM Mono',monospace;color:var(--red);font-weight:600">$${fmt(penaltyAmt)} (${+(getPenaltyRate(l)*100).toFixed(2)}%) ✓</td>`:`<td style="font-family:'DM Mono',monospace;color:var(--text3)">$${fmt(penaltyAmt)} (${+(getPenaltyRate(l)*100).toFixed(2)}%)</td>`;
+      }
+      return `<tr><td class="primary">${av}</td><td>${phone}</td><td>${freqBadge}</td><td style="font-family:'DM Mono',monospace;color:var(--green);font-weight:600">$${fmt(row.payment)}</td><td style="font-family:'DM Mono',monospace;color:var(--red)">$${fmt(bal)}</td><td style="color:var(--text2);white-space:nowrap">${fmtDate(row.dueDate)}</td>${showDays?`<td style="${daysStyle}">${daysOverdue} day${daysOverdue!==1?'s':''}</td>`:''}${penaltyCell}<td style="white-space:nowrap">${can('write')?`<button class="btn btn-success btn-sm" onclick="openAddRepayForLoan('${l.id}')">+ Pay</button> `:''}
+        <button class="btn btn-ghost btn-sm" onclick="openLoanDetail('${l.id}')">View</button></td></tr>`;
+    }).join('')}</tbody></table></div>`;
+  };
+  el.innerHTML=renderTable(overdueList,'',true);
+}
+
 function renderDuePayments(){
   const pg=document.getElementById('duePaymentsContent');
   const tzd=todayZW(), tzTomorrow=tomorrowZW();
   const freq=document.getElementById('dueFreqFilter')?.value||'';
 
-  // Auto-apply penalties for all overdue loans when this page loads
-  if(USE_DB){
+  // Auto-apply penalties sequentially (not parallel) to prevent race conditions
+  // Lock flag prevents re-entry if renderDuePayments is called again while running
+  if(USE_DB && !window._penaltyRunning){
     const overdueNow = loans.filter(l=>isLoanOverdue(l));
     if(overdueNow.length){
-      Promise.all(overdueNow.map(l=>applyAutoPenalties(l).catch(()=>0)))
-        .then(results=>{
-          const total = results.reduce((s,n)=>s+n,0);
-          if(total>0){
-            // Refresh admin fees then re-render
-            apiFetch('GET','/api/admin-fees'+branchParam()).then(fresh=>{
-              adminFeePayments=fresh.map(r=>({id:r.id,loanId:r.loanId||r.loan_id,amount:Number(r.amount),date:(r.date||'').slice(0,10),notes:r.notes||'',addedBy:r.addedBy||'',clientName:r.clientName||'',loanAmount:Number(r.loanAmount||0)}));
-              toast(`${total} penalty fee${total>1?'s':''} applied automatically`,'info');
-              renderDuePayments(); // refresh table to show ✓
-            }).catch(()=>{});
-          }
-        });
+      window._penaltyRunning = true;
+      // Process loans ONE AT A TIME so each penalty is saved before the next check
+      (async()=>{
+        let total = 0;
+        for(const l of overdueNow){
+          try{
+            // Re-fetch adminFeePayments before each loan so the duplicate check
+            // sees penalties written by previous iterations in this loop
+            const fresh = await apiFetch('GET','/api/admin-fees'+branchParam()).catch(()=>null);
+            if(fresh) adminFeePayments=fresh.map(r=>({id:r.id,loanId:r.loanId||r.loan_id,amount:Number(r.amount),date:(r.date||'').slice(0,10),notes:r.notes||'',addedBy:r.addedBy||'',clientName:r.clientName||'',loanAmount:Number(r.loanAmount||0)}));
+            const n = await applyAutoPenalties(l);
+            total += n||0;
+          }catch(e){}
+        }
+        window._penaltyRunning = false;
+        if(total>0){
+          // Refresh admin fees once at the end, then update just the penalty column
+          // WITHOUT calling renderDuePayments() again to avoid the recursive loop
+          const fresh = await apiFetch('GET','/api/admin-fees'+branchParam()).catch(()=>null);
+          if(fresh) adminFeePayments=fresh.map(r=>({id:r.id,loanId:r.loanId||r.loan_id,amount:Number(r.amount),date:(r.date||'').slice(0,10),notes:r.notes||'',addedBy:r.addedBy||'',clientName:r.clientName||'',loanAmount:Number(r.loanAmount||0)}));
+          toast(`${total} penalty fee${total>1?'s':''} applied automatically`,'info');
+          // Re-render the overdue table only (not the full page) to update ✓ badges
+          const tbody=document.getElementById('overdueTableBody');
+          if(tbody) _refreshOverdueTableBody(tbody,tzd);
+        }
+      })();
     }
   }
 
@@ -1531,7 +1588,7 @@ function renderDuePayments(){
     ${overdueList.length?`
     <div class="card" style="margin-bottom:18px">
       <div class="card-header"><span class="card-title" style="color:var(--red)">🚨 Overdue Payments (${overdueList.length})</span></div>
-      <div class="card-body" style="padding:0">${renderTable(overdueList,'',true)}</div>
+      <div class="card-body" style="padding:0" id="overdueTableBody">${renderTable(overdueList,'',true)}</div>
     </div>`:''}
 
     <div class="card" style="margin-bottom:18px">
