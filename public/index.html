@@ -636,6 +636,8 @@ async function loadData() {
     apiFetch('GET', '/api/application-fees'+branchParam()).then(r=>{
       applicationFeePayments = r.map(f=>({id:f.id,applicationId:f.applicationId,customerName:f.customerName||'',amount:Number(f.amount||0),date:(f.date||'').slice(0,10),notes:f.notes||'',addedBy:f.addedBy||'',createdAt:f.createdAt||''}));
     }).catch(()=>{});
+    window._penaltyRunning = false;          // reset lock
+    window._penaltyAppliedThisSession = false; // allow penalties to re-run after fresh data load
     clients    = clients.map(normaliseClient);
     loans      = loans.map(normaliseLoan);
     repayments = repayments.map(normaliseRepayment);
@@ -1448,8 +1450,11 @@ function renderDuePayments(){
   const tzd=todayZW(), tzTomorrow=tomorrowZW();
   const freq=document.getElementById('dueFreqFilter')?.value||'';
 
-  // Auto-apply penalties sequentially (not parallel) to prevent race conditions
-  // Lock flag prevents re-entry if renderDuePayments is called again while running
+// Auto-apply penalties sequentially (not parallel) to prevent race conditions
+  // Reset lock first — recursive call was removed so the lock can safely reset each render
+  if(USE_DB && !window._penaltyAppliedThisSession){
+    window._penaltyRunning = false; // clear any stale lock from a previous page load
+  }
   if(USE_DB && !window._penaltyRunning){
     const overdueNow = loans.filter(l=>isLoanOverdue(l));
     if(overdueNow.length){
@@ -1468,6 +1473,7 @@ function renderDuePayments(){
           }catch(e){}
         }
         window._penaltyRunning = false;
+        window._penaltyAppliedThisSession = true;
         if(total>0){
           // Refresh admin fees once at the end, then update just the penalty column
           // WITHOUT calling renderDuePayments() again to avoid the recursive loop
