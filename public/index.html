@@ -640,7 +640,7 @@ async function loadData() {
     loans      = loans.map(normaliseLoan);
     repayments = repayments.map(normaliseRepayment);
     expenses   = expenses.map(normaliseExpense);
-    adminFeePayments = adminFeePayments.map(r=>({id:r.id,loanId:r.loanId||r.loan_id,amount:Number(r.amount),date:(r.date||'').slice(0,10),notes:r.notes||'',addedBy:r.addedBy||'',clientName:r.clientName||'',loanAmount:Number(r.loanAmount||0)}));
+    adminFeePayments = adminFeePayments.map(r=>({id:r.id,loanId:r.loanId||r.loan_id,amount:Number(r.amount),date:(r.date||'').slice(0,10),notes:r.notes||'',addedBy:r.addedBy||'',clientName:r.clientName||'',loanAmount:Number(r.loanAmount||0),collected:r.collected||false,waived:r.waived||false,waiveReason:r.waiveReason||r.waive_reason||'',waivedBy:r.waivedBy||r.waived_by||''}));
     if(Array.isArray(branches)) branches = branches.map(b=>({id:b.id,name:b.name,active:b.active}));
     saveAll();
     updateStorageInfo();
@@ -934,16 +934,24 @@ function getLoanTotal(l){ return l.amount+(l.amount*l.interestRate/100); }
 function getLoanPaid(id){ return repayments.filter(r=>r.loanId===id).reduce((s,r)=>s+r.amount,0); }
 function getLoanBalance(id){ const l=loans.find(l=>l.id===id);if(!l)return 0;return Math.max(0,getLoanTotal(l)-getLoanPaid(id)); }
 // Use balance to determine true status — fixes completed loans showing incorrectly
+function getLoanPendingPenalties(loanId){
+  // Sum of auto-penalties that are neither collected nor waived
+  return adminFeePayments.filter(a=>
+    a.loanId===loanId &&
+    (a.notes||'').toLowerCase().includes('auto penalty') &&
+    !a.collected && !a.waived
+  ).reduce((s,a)=>s+a.amount,0);
+}
 function isLoanOverdue(loan){
   const amort = buildAmortisation(loan);
-  const todayStr = todayZW(); // Zimbabwe time
-  // Only count periods STRICTLY before today — client can still pay today
-  // This means overdue only triggers after midnight Zimbabwe time
+  const todayStr = todayZW();
   const duePeriods = amort.filter(r=>r.dueDate < todayStr).length;
   if(duePeriods===0) return false;
   const amountDue = duePeriods * (getLoanTotal(loan)/loan.term);
+  const pendingPenalties = getLoanPendingPenalties(loan.id);
   const totalPaid = getLoanPaid(loan.id);
-  return totalPaid < amountDue - 0.005;
+  // Overdue if payments don't cover installments AND outstanding penalties
+  return totalPaid < amountDue + pendingPenalties - 0.005;
 }
 function getLoanStatus(loan){
   const bal=getLoanBalance(loan.id);
@@ -1688,7 +1696,7 @@ function renderDashboard(){
       </div>
       <div class="card"><div class="card-header"><span class="card-title">Cash Summary</span></div><div class="card-body">
         <div style="display:flex;flex-direction:column;gap:10px">
-          ${[['Total Capital Deployed','$'+fmt(td),'var(--gold2)'],['Total Repayments Received','$'+fmt(tc),'var(--green)'],['Admin Fees Retained','$'+fmt(adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty')).reduce((s,a)=>s+a.amount,0)),'var(--gold2)'],['Application Fees','$'+fmt(applicationFeePayments.reduce((s,a)=>s+a.amount,0)),'var(--purple)'],['Total Operating Expenses','-$'+fmt(te),'var(--red)'],['Cash In Hand','$'+fmt(tc+adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty')).reduce((s,a)=>s+a.amount,0)+applicationFeePayments.reduce((s,a)=>s+a.amount,0)-te),(tc+adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty')).reduce((s,a)=>s+a.amount,0)+applicationFeePayments.reduce((s,a)=>s+a.amount,0)-te)>=0?'var(--green)':'var(--red)'],['Outstanding Balance','$'+fmt(to),'var(--amber)']].map(([l,v,c])=>`
+          ${[['Total Capital Deployed','$'+fmt(td),'var(--gold2)'],['Total Repayments Received','$'+fmt(tc),'var(--green)'],['Admin Fees Retained','$'+fmt(adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty')||a.collected).reduce((s,a)=>s+a.amount,0)),'var(--gold2)'],['Application Fees','$'+fmt(applicationFeePayments.reduce((s,a)=>s+a.amount,0)),'var(--purple)'],['Total Operating Expenses','-$'+fmt(te),'var(--red)'],['Cash In Hand','$'+fmt(tc+adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty')||a.collected).reduce((s,a)=>s+a.amount,0)+applicationFeePayments.reduce((s,a)=>s+a.amount,0)-te),(tc+adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty')||a.collected).reduce((s,a)=>s+a.amount,0)+applicationFeePayments.reduce((s,a)=>s+a.amount,0)-te)>=0?'var(--green)':'var(--red)'],['Outstanding Balance','$'+fmt(to),'var(--amber)']].map(([l,v,c])=>`
             <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--surface);border-radius:var(--radius-sm);border:1px solid var(--border)">
               <span style="font-size:13px;color:var(--text2)">${l}</span>
               <span style="font-weight:700;font-family:'DM Mono',monospace;color:${c}">${v}</span>
@@ -2160,6 +2168,48 @@ function getPenaltyRate(loan){
   return BRANCH_PENALTY_RATES[branch?.name] ?? DEFAULT_PENALTY_RATE;
 }
 
+let _waivePenaltyId = null;
+function openWaivePenalty(id, amountStr){
+  _waivePenaltyId = id;
+  const html = `
+    <div style="margin-bottom:14px;background:rgba(240,168,50,0.08);border:1px solid var(--amber);border-radius:var(--radius-sm);padding:10px 12px;font-size:12px;color:var(--amber)">
+      Waiving a penalty removes it from the client's outstanding balance. This action is logged in the audit trail.
+    </div>
+    <div style="font-size:14px;font-weight:600;margin-bottom:14px">Waive penalty of <span style="color:var(--red)">$${amountStr}</span>?</div>
+    <div class="form-group"><label>Reason * (required)</label><textarea id="waiveReasonInput" rows="3" placeholder="e.g. Client hardship, first offence, good payment history…"></textarea></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-ghost" style="flex:1" onclick="CM('mWaivePenalty')">Cancel</button>
+      <button class="btn btn-primary" id="waiveConfirmBtn" style="flex:1;background:var(--amber);border-color:var(--amber)" onclick="confirmWaivePenalty()">Waive Penalty</button>
+    </div>`;
+  // Reuse the confirm client modal as a generic dialog
+  document.getElementById('confirmClientBody').innerHTML = html;
+  document.querySelector('#mConfirmClient .modal-title').textContent = 'Waive Penalty';
+  document.querySelector('#mConfirmClient .modal-footer').style.display = 'none';
+  OM('mConfirmClient');
+}
+
+async function confirmWaivePenalty(){
+  const reason = document.getElementById('waiveReasonInput')?.value.trim();
+  if(!reason){ toast('A reason is required to waive a penalty','error'); return; }
+  const btn = document.getElementById('waiveConfirmBtn');
+  btn.disabled=true; btn.textContent='Waiving…';
+  try{
+    const result = await apiFetch('PUT',`/api/admin-fees/${_waivePenaltyId}/waive`,{reason});
+    // Update local adminFeePayments
+    const idx = adminFeePayments.findIndex(a=>a.id===_waivePenaltyId);
+    if(idx>=0) adminFeePayments[idx] = {...adminFeePayments[idx], waived:true, waiveReason:reason, waivedBy:currentUser?.username||'admin'};
+    CM('mConfirmClient');
+    document.querySelector('#mConfirmClient .modal-footer').style.display = '';
+    document.querySelector('#mConfirmClient .modal-title').textContent = '⚠️ Confirm Client Details';
+    toast('Penalty waived — overdue status updated','success');
+    // Refresh loan detail if open
+    if(_currentLoanId) openLoanDetail(_currentLoanId);
+  }catch(e){
+    toast('Error: '+e.message,'error');
+    btn.disabled=false; btn.textContent='Waive Penalty';
+  }
+}
+
 async function markAdminFeePaid(loanId, amountStr){
   const loan = loans.find(l=>l.id===loanId); if(!loan) return;
   const amount = parseFloat(amountStr);
@@ -2222,6 +2272,7 @@ async function applyAutoPenalties(loan){
 }
 
 async function openLoanDetail(id){
+  window._currentLoanId = id;
   const loan=loans.find(l=>l.id===id);if(!loan)return;
 
   // Always fetch fresh repayments and loan data from DB if connected
@@ -2361,21 +2412,29 @@ async function openLoanDetail(id){
       </tr></thead><tbody>
       ${allEntries.map(e=>{
         const isPenalty=e._type==='penalty', isFine=e._type==='fine', isAF=e._type==='adminfee';
+        const isWaived=isPenalty&&e.waived, isCollected=isPenalty&&e.collected;
         const typeBadge = isPenalty
-          ? `<span style="font-size:10px;background:rgba(232,84,84,0.15);color:var(--red);padding:1px 6px;border-radius:6px;font-weight:700">PENALTY</span>`
+          ? isWaived
+            ? `<span style="font-size:10px;background:rgba(139,139,139,0.15);color:var(--text3);padding:1px 6px;border-radius:6px;font-weight:700;text-decoration:line-through">WAIVED</span>`
+            : isCollected
+            ? `<span style="font-size:10px;background:rgba(39,201,122,0.15);color:var(--green);padding:1px 6px;border-radius:6px;font-weight:700">PENALTY ✓</span>`
+            : `<span style="font-size:10px;background:rgba(232,84,84,0.15);color:var(--red);padding:1px 6px;border-radius:6px;font-weight:700">PENALTY</span>`
           : isFine
           ? `<span style="font-size:10px;background:rgba(249,115,22,0.15);color:#f97316;padding:1px 6px;border-radius:6px;font-weight:700">FINE</span>`
           : isAF
           ? `<span style="font-size:10px;background:var(--gold-dim);color:var(--gold2);padding:1px 6px;border-radius:6px;font-weight:600">ADMIN FEE</span>`
           : '';
-        const amtColor = isPenalty?'var(--red)':isFine?'#f97316':isAF?'var(--gold2)':'var(--green)';
-        const editBtn  = e._type==='repayment'&&can('admin') ? `<button class="btn btn-ghost btn-sm" onclick="openEditRepayment('${e.id}')">✏️</button>` : '';
-        return `<tr style="border-bottom:1px solid var(--border)">
+        const amtColor = isWaived?'var(--text3)':isPenalty?'var(--red)':isFine?'#f97316':isAF?'var(--gold2)':'var(--green)';
+        const notesDisplay = isWaived?`${e.notes||''} <em style="color:var(--text3);font-size:11px">(Waived by ${e.waivedBy||'admin'}: ${e.waiveReason||''})</em>`:(e.notes||'—');
+        const waiveBtn = isPenalty&&!isWaived&&!isCollected&&can('admin')
+          ? `<button class="btn btn-ghost btn-sm" style="font-size:10px;color:var(--amber)" onclick="openWaivePenalty('${e.id}','${fmt(e.amount)}')">Waive</button>`:'';
+        const editBtn = e._type==='repayment'&&can('admin') ? `<button class="btn btn-ghost btn-sm" onclick="openEditRepayment('${e.id}')">✏️</button>` : '';
+        return `<tr style="border-bottom:1px solid var(--border)${isWaived?';opacity:0.55':''}">
           <td style="padding:8px 10px;color:var(--text2)">${fmtDate(e.date)}</td>
-          <td style="padding:8px 10px;color:${amtColor};text-align:right;font-family:'DM Mono',monospace;font-weight:600">+$${fmt(e.amount)}</td>
+          <td style="padding:8px 10px;color:${amtColor};text-align:right;font-family:'DM Mono',monospace;font-weight:600">${isWaived?'<s>':''}+$${fmt(e.amount)}${isWaived?'</s>':''}</td>
           <td style="padding:8px 10px">${typeBadge}</td>
-          <td style="padding:8px 10px;color:var(--text3)">${e.notes||'—'}</td>
-          <td style="padding:8px 10px" onclick="event.stopPropagation()">${editBtn}</td>
+          <td style="padding:8px 10px;color:var(--text3);font-size:12px">${notesDisplay}</td>
+          <td style="padding:8px 10px" onclick="event.stopPropagation()">${waiveBtn}${editBtn}</td>
         </tr>`;
       }).join('')}
       </tbody></table>`;
@@ -2549,13 +2608,18 @@ function updateRepayInfo(){
   const loan=loans.find(l=>l.id===id),c=loan?clients.find(c=>c.id===loan.clientId):null;
   const bal=getLoanBalance(id),periodic=getLoanTotal(loan)/loan.term;
   const isDefaulted=getLoanStatus(loan)==='defaulted';
+  const pendingPenalties=getLoanPendingPenalties(id);
+  const suggested=Math.round((periodic+pendingPenalties)*100)/100;
   // Show fine field only for defaulted loans
   const fw=document.getElementById('fRFineWrap');
   if(fw){ fw.style.display=isDefaulted?'':'none'; }
   if(document.getElementById('fRFine')) document.getElementById('fRFine').value='';
   info.style.display='block';
-  info.innerHTML='<strong style="color:var(--text)">'+(c?.name||'')+'</strong> $'+fmt(loan.amount)+' @ '+loan.interestRate+'% &nbsp;·&nbsp; Balance: <strong style="color:var(--red)">$'+fmt(bal)+'</strong> &nbsp;·&nbsp; Suggested: <strong style="color:var(--green)">$'+fmt(periodic)+'</strong>'+(isDefaulted?'<br><span style="color:var(--amber)">⚠️ Defaulted — you can add a fine/penalty amount below</span>':'');
-  document.getElementById('fRA').value=Math.round(periodic);
+  const penaltyLine=pendingPenalties>0
+    ?`<br><span style="color:var(--red);font-size:12px">⚠️ Outstanding penalty: <strong>$${fmt(pendingPenalties)}</strong> — included in suggested amount</span>`
+    :'';
+  info.innerHTML='<strong style="color:var(--text)">'+(c?.name||'')+'</strong> $'+fmt(loan.amount)+' @ '+loan.interestRate+'% &nbsp;·&nbsp; Balance: <strong style="color:var(--red)">$'+fmt(bal)+'</strong> &nbsp;·&nbsp; Suggested: <strong style="color:var(--green)">$'+fmt(suggested)+'</strong>'+(isDefaulted?'<br><span style="color:var(--amber)">⚠️ Defaulted — you can add a fine/penalty amount below</span>':'')+penaltyLine;
+  document.getElementById('fRA').value=suggested;
 }
 async function saveRepay(){
   const loanId=document.getElementById('fRL').value,amount=parseFloat(document.getElementById('fRA').value),date=document.getElementById('fRD').value;
@@ -2722,7 +2786,7 @@ function renderFinancials(){
   if(!can('admin')){document.getElementById('finContent').innerHTML=permDenied('Financial Overview is for Administrators only.');return;}
   const td=loans.reduce((s,l)=>s+l.amount,0),ti=loans.reduce((s,l)=>s+(l.amount*l.interestRate/100),0);
   const tc=repayments.reduce((s,r)=>s+r.amount,0),te=expenses.reduce((s,e)=>s+e.amount,0);
-  const taf=adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty')).reduce((s,a)=>s+a.amount,0);
+  const taf=adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty')||a.collected).reduce((s,a)=>s+a.amount,0);
   const tafApp=applicationFeePayments.reduce((s,a)=>s+a.amount,0);
   const al=loans.filter(l=>l.status==='active'||getLoanStatus(l)==='active'),to=al.reduce((s,l)=>s+getLoanBalance(l.id),0);
   const cashInHand=tc+taf+tafApp-te,netProfit=tc+taf-td-te+to,roi=td>0?((ti/td)*100).toFixed(1):0;
@@ -2762,7 +2826,7 @@ function renderFinancials(){
             <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 16px 8px 32px;color:var(--text2)">Total Loan Repayments Received</td><td style="text-align:right;padding:8px 16px;color:var(--green);font-family:'DM Mono',monospace;font-weight:600">+ $${fmt(tc)}</td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 16px 8px 32px;color:var(--text2)">Admin Fees Retained</td><td style="text-align:right;padding:8px 16px;color:var(--gold2);font-family:'DM Mono',monospace;font-weight:600">+ $${fmt(taf)}</td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 16px 8px 32px;color:var(--text2)">Application Fees</td><td style="text-align:right;padding:8px 16px;color:var(--purple);font-family:'DM Mono',monospace;font-weight:600">+ $${fmt(tafApp)}</td></tr>
-            ${adminFeePayments.filter(a=>(a.notes||'').toLowerCase().includes('auto penalty')).length?`<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 16px 8px 32px;color:var(--text3);font-style:italic">Pending Penalties (not yet collected)</td><td style="text-align:right;padding:8px 16px;color:var(--text3);font-family:'DM Mono',monospace">$${fmt(adminFeePayments.filter(a=>(a.notes||'').toLowerCase().includes('auto penalty')).reduce((s,a)=>s+a.amount,0))} ⏳</td></tr>`:''}
+            ${adminFeePayments.filter(a=>(a.notes||'').toLowerCase().includes('auto penalty')).length?`<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 16px 8px 32px;color:var(--text3);font-style:italic">Pending Penalties (not yet collected)</td><td style="text-align:right;padding:8px 16px;color:var(--text3);font-family:'DM Mono',monospace">$${fmt(adminFeePayments.filter(a=>(a.notes||'').toLowerCase().includes('auto penalty')&&!a.collected&&!a.waived).reduce((s,a)=>s+a.amount,0))} ⏳</td></tr>`:''}
             <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 16px 8px 32px;color:var(--text3);font-size:12px">Outstanding (still to collect)</td><td style="text-align:right;padding:8px 16px;color:var(--amber);font-family:'DM Mono',monospace;font-size:12px">+ $${fmt(to)}</td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 16px;font-weight:700;color:var(--text)">OUTFLOWS</td><td></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 16px 8px 32px;color:var(--text2)">Total Capital Disbursed (Loans)</td><td style="text-align:right;padding:8px 16px;color:var(--red);font-family:'DM Mono',monospace;font-weight:600">- $${fmt(td)}</td></tr>
@@ -2788,7 +2852,7 @@ function renderReports(){
   const td=loans.reduce((s,l)=>s+l.amount,0),ti=loans.reduce((s,l)=>s+(l.amount*l.interestRate/100),0);
   const tc=repayments.reduce((s,r)=>s+r.amount,0),al=loans.filter(l=>getLoanStatus(l)==='active');
   // Exclude auto-penalties from income — only count admin fees and manually collected fines
-  const collectedFees=adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty'));
+  const collectedFees=adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty')||a.collected);
   const pendingPenalties=adminFeePayments.filter(a=>(a.notes||'').toLowerCase().includes('auto penalty'));
   const totalAdminFees=collectedFees.reduce((s,a)=>s+a.amount,0);
   const totalPendingPenalties=pendingPenalties.reduce((s,a)=>s+a.amount,0);
@@ -3152,6 +3216,7 @@ async function renderAudit(){
     'RECORD_FINE':      {color:'#f97316',bg:'rgba(249,115,22,0.12)', label:'FINE'},
     'RECORD_ADMIN_FEE':{color:'#e8b84b',bg:'rgba(232,184,75,0.12)', label:'ADMIN FEE PAID'},
     'AUTO_PENALTY':    {color:'#e85454',bg:'rgba(232,84,84,0.12)',  label:'AUTO PENALTY'},
+    'WAIVE_PENALTY':   {color:'#f0a832',bg:'rgba(240,168,50,0.12)',  label:'WAIVE PENALTY'},
     'DELETE_EXPENSE':   {color:'#e85454',bg:'rgba(232,84,84,0.12)',  label:'DELETE EXPENSE'},
     'CREATE_USER':      {color:'#a855f7',bg:'rgba(168,85,247,0.12)', label:'CREATE USER'},
     'UPDATE_USER':      {color:'#a855f7',bg:'rgba(168,85,247,0.12)', label:'EDIT USER'},

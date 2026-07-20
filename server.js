@@ -164,7 +164,7 @@ const mapLoan = (r, totalPaid) => {
     repaymentStartDate: r.repayment_start_date ? r.repayment_start_date.toISOString().slice(0,10) : ''
   };
 };
-const mapAdminFee = r => ({ id:r.id, loanId:r.loan_id, amount:Number(r.amount), date:r.date?r.date.toISOString().slice(0,10):'', notes:r.notes||'', addedBy:r.added_by||'' });
+const mapAdminFee = r => ({ id:r.id, loanId:r.loan_id, amount:Number(r.amount), date:r.date?r.date.toISOString().slice(0,10):'', notes:r.notes||'', addedBy:r.added_by||'', collected:r.collected||false, waived:r.waived||false, waiveReason:r.waive_reason||'', waivedBy:r.waived_by||'' });
 const mapRepay  = r => ({ id:r.id, loanId:r.loan_id, amount:Number(r.amount), date:r.date?r.date.toISOString().slice(0,10):'', notes:r.notes||'', addedBy:r.added_by||'' });
 const mapExp    = r => ({ id:r.id, amount:Number(r.amount), category:r.category||'', description:r.description||'', date:r.date?r.date.toISOString().slice(0,10):'', addedBy:r.added_by||'', branchId:r.branch_id||'' });
 
@@ -545,13 +545,36 @@ app.post('/api/repayments', requireAuth, requireDB, requireRole('admin','loan_of
           if(due.toISOString().slice(0,10) < todayZWStr) duePeriods++;
         }
       }
-      const isOverdue = duePeriods > 0 && totalPaid < (duePeriods * periodicPay) - 0.005;
+      // Include uncollected, non-waived penalties in overdue threshold
+      const { rows: pendingPenaltyRows } = await pool.query(
+        `SELECT COALESCE(SUM(amount),0)::float AS total FROM admin_fee_payments
+         WHERE loan_id=$1 AND notes ILIKE '%auto penalty%' AND collected=FALSE AND waived=FALSE`, [loanId]
+      );
+      const pendingPenaltyTotal = Number(pendingPenaltyRows[0].total||0);
+      const isOverdue = duePeriods > 0 && totalPaid < (duePeriods * periodicPay + pendingPenaltyTotal) - 0.005;
       let newStatus;
       if(totalPaid >= totalOwed - 0.005) newStatus = 'completed';
       else if(isOverdue)                  newStatus = 'defaulted';
       else                                newStatus = 'active';
       if(newStatus !== loan.status){
         await pool.query('UPDATE loans SET status=$1,updated_at=NOW() WHERE id=$2', [newStatus, loanId]);
+      }
+      // Mark auto-penalties as collected if total payments now cover installments + penalties
+      // Penalties are counted from oldest to newest — excess beyond installments covers them in order
+      const { rows: penaltyRows } = await pool.query(
+        `SELECT id, amount, notes FROM admin_fee_payments
+         WHERE loan_id=$1 AND notes ILIKE '%auto penalty%' AND collected=FALSE AND waived=FALSE
+         ORDER BY created_at ASC`, [loanId]
+      );
+      if(penaltyRows.length){
+        const installmentsDue = duePeriods * periodicPay;
+        let excess = Math.max(0, totalPaid - installmentsDue);
+        for(const p of penaltyRows){
+          if(excess >= Number(p.amount) - 0.005){
+            await pool.query('UPDATE admin_fee_payments SET collected=TRUE WHERE id=$1',[p.id]);
+            excess -= Number(p.amount);
+          } else break;
+        }
       }
     }
     await audit(req.user.id, req.user.username, 'RECORD_REPAYMENT', 'Repayment', id, `$${amount} for loan ${loanId}`);
@@ -655,6 +678,28 @@ app.post('/api/admin-fees', requireAuth, requireDB, requireRole('admin','loan_of
     const { rows } = await pool.query('SELECT * FROM admin_fee_payments WHERE id=$1', [id]);
     res.status(201).json(mapAdminFee(rows[0]));
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Waive penalty — requires reason, keeps record for audit trail
+app.put('/api/admin-fees/:id/waive', requireAuth, requireDB, requireRole('admin'), async (req, res) => {
+  try {
+    const { reason } = req.body;
+    if(!reason||!reason.trim()) return res.status(400).json({ error: 'A reason is required to waive a penalty' });
+    const { rows: ex } = await pool.query('SELECT * FROM admin_fee_payments WHERE id=$1',[req.params.id]);
+    if(!ex.length) return res.status(404).json({ error: 'Penalty not found' });
+    if(ex[0].waived) return res.status(400).json({ error: 'Already waived' });
+    if(!(ex[0].notes||'').toLowerCase().includes('auto penalty')) return res.status(400).json({ error: 'Only auto-penalties can be waived' });
+    await pool.query(
+      `UPDATE admin_fee_payments SET waived=TRUE,waive_reason=$1,waived_by=$2 WHERE id=$3`,
+      [reason.trim(), req.user.username, req.params.id]
+    );
+    const loan = ex[0].loan_id ? (await pool.query('SELECT client_id,amount FROM loans WHERE id=$1',[ex[0].loan_id])).rows[0] : null;
+    const client = loan ? (await pool.query('SELECT name FROM clients WHERE id=$1',[loan.client_id])).rows[0] : null;
+    await audit(req.user.id, req.user.username, 'WAIVE_PENALTY', 'AdminFee', req.params.id,
+      `$${ex[0].amount} waived${client?' — '+client.name:''} — Reason: ${reason.trim()}`);
+    const { rows } = await pool.query('SELECT * FROM admin_fee_payments WHERE id=$1',[req.params.id]);
+    res.json(mapAdminFee(rows[0]));
+  } catch(err){ res.status(500).json({ error: err.message }); }
 });
 
 app.delete('/api/admin-fees/:id', requireAuth, requireDB, requireRole('admin'), async (req, res) => {
