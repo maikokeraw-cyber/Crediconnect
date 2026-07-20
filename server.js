@@ -851,11 +851,36 @@ app.post('/api/mobile-applications', requireAuth, requireDB, requireRole('admin'
     const ins = await conn.query(`INSERT INTO mobile_loan_requests (customer_id,amount,interest_rate,term,term_frequency,purpose,notes,status,application_fee,source,created_by,branch_id) VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8,'manual',$9,$10) RETURNING id`,
       [custId,amount,interestRate,term,termFrequency||'monthly',purpose||null,notes||null,applicationFee||0,req.user.username,branchId||null]);
     await conn.query('COMMIT');
-    await audit(req.user.id,req.user.username,'ADD_MOBILE_LOAN','MobileLoan',ins.rows[0].id,`$${amount} manual application`,branchId);
+    // Record application fee immediately in financials if > 0
+    if((applicationFee||0) > 0){
+      // Get customer name for the record
+      const cust = await pool.query('SELECT name FROM mobile_customers WHERE id=$1',[custId]);
+      const custName = cust.rows[0]?.name||'';
+      await pool.query(
+        `INSERT INTO application_fee_payments (application_id,customer_name,amount,date,notes,added_by)
+         VALUES ($1,$2,$3,CURRENT_DATE,$4,$5)`,
+        [ins.rows[0].id, custName, applicationFee, `Application fee — ${custName}`, req.user.username]
+      );
+    }
+    await audit(req.user.id,req.user.username,'ADD_MOBILE_LOAN','MobileLoan',ins.rows[0].id,`$${amount} manual application${applicationFee>0?' — application fee $'+applicationFee:''}`,branchId);
     const { rows } = await pool.query(MOBILE_APP_JOIN+' WHERE l.id=$1',[ins.rows[0].id]);
     res.status(201).json(mapMobileApp(rows[0]));
   } catch (err) { await conn.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: err.message }); }
   finally { conn.release(); }
+});
+
+// Application fee payments — recorded at intake
+app.get('/api/application-fees', requireAuth, requireDB, requireRole('admin','loan_officer'), async (req, res) => {
+  try {
+    const bf = getBranchFilter(req.user, req.query);
+    let sql = `SELECT af.*, lr.branch_id FROM application_fee_payments af
+               JOIN mobile_loan_requests lr ON lr.id = af.application_id`;
+    const params = [];
+    if(bf.value){ params.push(bf.value); sql += ` WHERE lr.branch_id = $${params.length}`; }
+    sql += ' ORDER BY af.created_at DESC';
+    const { rows } = await pool.query(sql, params);
+    res.json(rows.map(r=>({ id:r.id, applicationId:r.application_id, customerName:r.customer_name||'', amount:Number(r.amount||0), date:(r.date||'').slice?.(0,10)||'', notes:r.notes||'', addedBy:r.added_by||'', createdAt:r.created_at?.toISOString()||'' })));
+  } catch(err){ res.status(500).json({ error: err.message }); }
 });
 
 // Approve — creates real client + loan, records admin fee

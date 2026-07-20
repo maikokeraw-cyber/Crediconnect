@@ -582,6 +582,7 @@ let loans      = lsGet(K.loans,     []);
 let repayments = lsGet(K.repayments,[]);
 let expenses         = lsGet(K.expenses,  []);
 let adminFeePayments = lsGet(K.adminFees, []);
+let applicationFeePayments = []; // loaded from DB only — no offline equivalent
 let users      = lsGet(K.users,     []);
 let auditLog   = lsGet(K.audit,     []);
 let branches         = [];
@@ -631,6 +632,10 @@ async function loadData() {
       apiFetch('GET', '/api/admin-fees'+branchParam()),
       apiFetch('GET', '/api/branches'),
     ]);
+    // Load application fees separately (non-critical — don't block if fails)
+    apiFetch('GET', '/api/application-fees'+branchParam()).then(r=>{
+      applicationFeePayments = r.map(f=>({id:f.id,applicationId:f.applicationId,customerName:f.customerName||'',amount:Number(f.amount||0),date:(f.date||'').slice(0,10),notes:f.notes||'',addedBy:f.addedBy||'',createdAt:f.createdAt||''}));
+    }).catch(()=>{});
     clients    = clients.map(normaliseClient);
     loans      = loans.map(normaliseLoan);
     repayments = repayments.map(normaliseRepayment);
@@ -1683,7 +1688,7 @@ function renderDashboard(){
       </div>
       <div class="card"><div class="card-header"><span class="card-title">Cash Summary</span></div><div class="card-body">
         <div style="display:flex;flex-direction:column;gap:10px">
-          ${[['Total Capital Deployed','$'+fmt(td),'var(--gold2)'],['Total Repayments Received','$'+fmt(tc),'var(--green)'],['Admin Fees Retained','$'+fmt(adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty')).reduce((s,a)=>s+a.amount,0)),'var(--gold2)'],['Total Operating Expenses','-$'+fmt(te),'var(--red)'],['Cash In Hand','$'+fmt(tc+adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty')).reduce((s,a)=>s+a.amount,0)-te),(tc+adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty')).reduce((s,a)=>s+a.amount,0)-te)>=0?'var(--green)':'var(--red)'],['Outstanding Balance','$'+fmt(to),'var(--amber)']].map(([l,v,c])=>`
+          ${[['Total Capital Deployed','$'+fmt(td),'var(--gold2)'],['Total Repayments Received','$'+fmt(tc),'var(--green)'],['Admin Fees Retained','$'+fmt(adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty')).reduce((s,a)=>s+a.amount,0)),'var(--gold2)'],['Application Fees','$'+fmt(applicationFeePayments.reduce((s,a)=>s+a.amount,0)),'var(--purple)'],['Total Operating Expenses','-$'+fmt(te),'var(--red)'],['Cash In Hand','$'+fmt(tc+adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty')).reduce((s,a)=>s+a.amount,0)+applicationFeePayments.reduce((s,a)=>s+a.amount,0)-te),(tc+adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty')).reduce((s,a)=>s+a.amount,0)+applicationFeePayments.reduce((s,a)=>s+a.amount,0)-te)>=0?'var(--green)':'var(--red)'],['Outstanding Balance','$'+fmt(to),'var(--amber)']].map(([l,v,c])=>`
             <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--surface);border-radius:var(--radius-sm);border:1px solid var(--border)">
               <span style="font-size:13px;color:var(--text2)">${l}</span>
               <span style="font-weight:700;font-family:'DM Mono',monospace;color:${c}">${v}</span>
@@ -2718,8 +2723,9 @@ function renderFinancials(){
   const td=loans.reduce((s,l)=>s+l.amount,0),ti=loans.reduce((s,l)=>s+(l.amount*l.interestRate/100),0);
   const tc=repayments.reduce((s,r)=>s+r.amount,0),te=expenses.reduce((s,e)=>s+e.amount,0);
   const taf=adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty')).reduce((s,a)=>s+a.amount,0);
+  const tafApp=applicationFeePayments.reduce((s,a)=>s+a.amount,0);
   const al=loans.filter(l=>l.status==='active'||getLoanStatus(l)==='active'),to=al.reduce((s,l)=>s+getLoanBalance(l.id),0);
-  const cashInHand=tc+taf-te,netProfit=tc+taf-td-te+to,roi=td>0?((ti/td)*100).toFixed(1):0;
+  const cashInHand=tc+taf+tafApp-te,netProfit=tc+taf-td-te+to,roi=td>0?((ti/td)*100).toFixed(1):0;
   const catMap={};expenses.forEach(e=>{catMap[e.category]=(catMap[e.category]||0)+e.amount;});
   const catSorted=Object.entries(catMap).sort((a,b)=>b[1]-a[1]);
   const ml=[],mIn=[],mOut=[];
@@ -2755,6 +2761,7 @@ function renderFinancials(){
             <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 16px;font-weight:700;color:var(--text)">INFLOWS</td><td></td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 16px 8px 32px;color:var(--text2)">Total Loan Repayments Received</td><td style="text-align:right;padding:8px 16px;color:var(--green);font-family:'DM Mono',monospace;font-weight:600">+ $${fmt(tc)}</td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 16px 8px 32px;color:var(--text2)">Admin Fees Retained</td><td style="text-align:right;padding:8px 16px;color:var(--gold2);font-family:'DM Mono',monospace;font-weight:600">+ $${fmt(taf)}</td></tr>
+            <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 16px 8px 32px;color:var(--text2)">Application Fees</td><td style="text-align:right;padding:8px 16px;color:var(--purple);font-family:'DM Mono',monospace;font-weight:600">+ $${fmt(tafApp)}</td></tr>
             ${adminFeePayments.filter(a=>(a.notes||'').toLowerCase().includes('auto penalty')).length?`<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 16px 8px 32px;color:var(--text3);font-style:italic">Pending Penalties (not yet collected)</td><td style="text-align:right;padding:8px 16px;color:var(--text3);font-family:'DM Mono',monospace">$${fmt(adminFeePayments.filter(a=>(a.notes||'').toLowerCase().includes('auto penalty')).reduce((s,a)=>s+a.amount,0))} ⏳</td></tr>`:''}
             <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 16px 8px 32px;color:var(--text3);font-size:12px">Outstanding (still to collect)</td><td style="text-align:right;padding:8px 16px;color:var(--amber);font-family:'DM Mono',monospace;font-size:12px">+ $${fmt(to)}</td></tr>
             <tr style="border-bottom:1px solid var(--border)"><td style="padding:10px 16px;font-weight:700;color:var(--text)">OUTFLOWS</td><td></td></tr>
