@@ -101,6 +101,7 @@ async function setup() {
     await client.query(`ALTER TABLE admin_fee_payments ADD COLUMN IF NOT EXISTS waived BOOLEAN NOT NULL DEFAULT FALSE`);
     await client.query(`ALTER TABLE admin_fee_payments ADD COLUMN IF NOT EXISTS waive_reason TEXT`);
     await client.query(`ALTER TABLE admin_fee_payments ADD COLUMN IF NOT EXISTS waived_by VARCHAR(100)`);
+    await client.query(`ALTER TABLE admin_fee_payments ADD COLUMN IF NOT EXISTS settled BOOLEAN NOT NULL DEFAULT FALSE`);
     await client.query(`ALTER TABLE clients ADD COLUMN IF NOT EXISTS phone2 VARCHAR(20)`);
     await client.query(`ALTER TABLE loans ADD COLUMN IF NOT EXISTS branch_id VARCHAR(50) REFERENCES branches(id)`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_loans_client_id ON loans(client_id)`);

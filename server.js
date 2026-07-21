@@ -164,7 +164,7 @@ const mapLoan = (r, totalPaid) => {
     repaymentStartDate: r.repayment_start_date ? r.repayment_start_date.toISOString().slice(0,10) : ''
   };
 };
-const mapAdminFee = r => ({ id:r.id, loanId:r.loan_id, amount:Number(r.amount), date:r.date?r.date.toISOString().slice(0,10):'', notes:r.notes||'', addedBy:r.added_by||'', collected:r.collected||false, waived:r.waived||false, waiveReason:r.waive_reason||'', waivedBy:r.waived_by||'' });
+const mapAdminFee = r => ({ id:r.id, loanId:r.loan_id, amount:Number(r.amount), date:r.date?r.date.toISOString().slice(0,10):'', notes:r.notes||'', addedBy:r.added_by||'', collected:r.collected||false, waived:r.waived||false, waiveReason:r.waive_reason||'', waivedBy:r.waived_by||'', settled:r.settled||false });
 const mapRepay  = r => ({ id:r.id, loanId:r.loan_id, amount:Number(r.amount), date:r.date?r.date.toISOString().slice(0,10):'', notes:r.notes||'', addedBy:r.added_by||'' });
 const mapExp    = r => ({ id:r.id, amount:Number(r.amount), category:r.category||'', description:r.description||'', date:r.date?r.date.toISOString().slice(0,10):'', addedBy:r.added_by||'', branchId:r.branch_id||'' });
 
@@ -545,13 +545,13 @@ app.post('/api/repayments', requireAuth, requireDB, requireRole('admin','loan_of
           if(due.toISOString().slice(0,10) < todayZWStr) duePeriods++;
         }
       }
-      // Include uncollected, non-waived penalties in overdue threshold
-      const { rows: pendingPenaltyRows } = await pool.query(
-        `SELECT COALESCE(SUM(amount),0)::float AS total FROM admin_fee_payments
-         WHERE loan_id=$1 AND notes ILIKE '%auto penalty%' AND collected=FALSE AND waived=FALSE`, [loanId]
+      // Overdue if installments not paid OR has unsettled auto-penalty
+      const { rows: unsettledRows } = await pool.query(
+        `SELECT COUNT(*) AS cnt FROM admin_fee_payments
+         WHERE loan_id=$1 AND notes ILIKE '%auto penalty%' AND settled=FALSE AND waived=FALSE`, [loanId]
       );
-      const pendingPenaltyTotal = Number(pendingPenaltyRows[0].total||0);
-      const isOverdue = duePeriods > 0 && totalPaid < (duePeriods * periodicPay + pendingPenaltyTotal) - 0.005;
+      const hasUnsettledPenalty = Number(unsettledRows[0].cnt) > 0;
+      const isOverdue = (duePeriods > 0 && totalPaid < (duePeriods * periodicPay) - 0.005) || hasUnsettledPenalty;
       let newStatus;
       if(totalPaid >= totalOwed - 0.005) newStatus = 'completed';
       else if(isOverdue)                  newStatus = 'defaulted';
@@ -664,15 +664,24 @@ app.post('/api/admin-fees', requireAuth, requireDB, requireRole('admin','loan_of
     if (!loanId || !amount || !date) return res.status(400).json({ error: 'loanId, amount and date required' });
     const id = uuidv4();
     const isPenalty = (notes||'').toLowerCase().includes('auto penalty');
+    const isFine    = (notes||'').toLowerCase().includes('fine');
     await pool.query(
       `INSERT INTO admin_fee_payments (id,loan_id,amount,date,notes,added_by) VALUES ($1,$2,$3,$4,$5,$6)`,
       [id, loanId, amount, date, notes||null, req.user.id]
     );
-    // Only update admin_fees_status for actual admin fees — not auto penalties
-    if(!isPenalty){
+    // Only update admin_fees_status for actual admin fees — not auto penalties or fines
+    if(!isPenalty && !isFine){
       await pool.query(`UPDATE loans SET admin_fees_status='paid',updated_at=NOW() WHERE id=$1`, [loanId]);
     }
-    // Use different audit action for penalties vs admin fees
+    // When a manual fine is recorded, automatically settle any unsettled auto-penalties
+    // for that loan — any fine amount counts regardless of exact match
+    if(isFine && loanId){
+      await pool.query(
+        `UPDATE admin_fee_payments SET settled=TRUE
+         WHERE loan_id=$1 AND notes ILIKE '%auto penalty%' AND settled=FALSE AND waived=FALSE`,
+        [loanId]
+      );
+    }
     const auditAction = isPenalty ? 'AUTO_PENALTY' : 'RECORD_ADMIN_FEE';
     await audit(req.user.id, req.user.username, auditAction, 'AdminFee', id, notes||`$${amount} for loan ${loanId}`);
     const { rows } = await pool.query('SELECT * FROM admin_fee_payments WHERE id=$1', [id]);
@@ -1052,8 +1061,7 @@ app.post('/api/cron/penalties', async (req, res) => {
   }
   if(!dbConnected) return res.status(503).json({ error: 'DB not connected' });
 
-  const BRANCH_RATES   = { 'Harare':0.05, 'Bulawayo':0.035, 'Kwekwe':0.035 };
-  const DEFAULT_RATE   = 0.05;
+  const PENALTY_RATE   = 0.04; // 4% flat for all branches — v5.1
   // Zimbabwe UTC+2
   const nowZW          = new Date(new Date().getTime() + 2*60*60*1000);
   const todayStr       = nowZW.toISOString().slice(0,10);
@@ -1099,7 +1107,7 @@ app.post('/api/cron/penalties', async (req, res) => {
         if(existing.length){ skipped++; continue; }
 
         // Apply penalty
-        const rate       = BRANCH_RATES[loan.branch_name] || DEFAULT_RATE;
+        const rate       = PENALTY_RATE;
         const penaltyAmt = Math.round(periodicPay * rate * 10000) / 10000;
         const noteText   = `Auto penalty period ${currentMissed.month} — ${+(rate*100).toFixed(2)}% of $${periodicPay.toFixed(2)} (${loan.client_name||''})`;
         const penaltyId  = uuidv4();
