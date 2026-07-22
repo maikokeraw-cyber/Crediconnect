@@ -1699,6 +1699,51 @@ function renderDashboard(){
       <div class="card"><div class="card-header"><span class="card-title">Portfolio Status</span></div><div class="card-body"><div class="chart-container"><canvas id="cPortfolio"></canvas></div></div></div>
       <div class="card"><div class="card-header"><span class="card-title">Monthly Repayments</span></div><div class="card-body"><div class="chart-container"><canvas id="cRepay"></canvas></div></div></div>
     </div>
+
+    <div class="card" style="margin-bottom:18px">
+      <div class="card-header"><span class="card-title">Monthly Breakdown</span><span style="font-size:11px;color:var(--text3)">Last 6 months</span></div>
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Month</th>
+          <th style="text-align:right;color:var(--gold2)">Capital Issued</th>
+          <th style="text-align:right;color:var(--green)">Interest Earned</th>
+          <th style="text-align:right;color:var(--red)">Expenses</th>
+          <th style="text-align:right;color:var(--text2)">Net</th>
+        </tr></thead>
+        <tbody>${(()=>{
+          const rows=[];
+          let totCap=0,totInt=0,totExp=0;
+          for(let i=5;i>=0;i--){
+            const d=new Date(); d.setMonth(d.getMonth()-i);
+            const ms=d.toISOString().slice(0,7);
+            const label=d.toLocaleString('en',{month:'long',year:'numeric'});
+            // Capital = sum of loan amounts disbursed this month
+            const cap=loans.filter(l=>l.startDate&&l.startDate.startsWith(ms)).reduce((s,l)=>s+l.amount,0);
+            // Interest = expected interest on loans disbursed this month
+            const interest=loans.filter(l=>l.startDate&&l.startDate.startsWith(ms)).reduce((s,l)=>s+(l.amount*l.interestRate/100),0);
+            // Expenses = actual expenses recorded this month
+            const exp=expenses.filter(e=>e.date&&e.date.startsWith(ms)).reduce((s,e)=>s+e.amount,0);
+            const net=interest-exp;
+            totCap+=cap; totInt+=interest; totExp+=exp;
+            rows.push(`<tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:9px 14px;font-weight:500">${label}</td>
+              <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;color:var(--gold2)">${cap>0?'$'+fmt(cap):'—'}</td>
+              <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;color:var(--green)">${interest>0?'$'+fmt(interest):'—'}</td>
+              <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;color:var(--red)">${exp>0?'-$'+fmt(exp):'—'}</td>
+              <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;font-weight:600;color:${net>=0?'var(--green)':'var(--red)'}">${net!==0?(net>=0?'+':'')+'$'+fmt(Math.abs(net)):'—'}</td>
+            </tr>`);
+          }
+          rows.push(`<tr style="background:var(--surface);font-weight:700">
+            <td style="padding:9px 14px">Total</td>
+            <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;color:var(--gold2)">$${fmt(totCap)}</td>
+            <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;color:var(--green)">$${fmt(totInt)}</td>
+            <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;color:var(--red)">-$${fmt(totExp)}</td>
+            <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;color:${(totInt-totExp)>=0?'var(--green)':'var(--red)'}">${(totInt-totExp)>=0?'+':''}$${fmt(Math.abs(totInt-totExp))}</td>
+          </tr>`);
+          return rows.join('');
+        })()}</tbody>
+      </table></div>
+    </div>
     <div class="two-col">
       <div class="card"><div class="card-header"><span class="card-title">Recent Clients</span><button class="btn btn-ghost btn-sm" onclick="navigate('clients')">View All →</button></div>
         <div class="table-wrap"><table><thead><tr><th>Client</th><th>Phone</th><th>Loans</th><th>Joined</th></tr></thead><tbody>${
