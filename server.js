@@ -904,18 +904,17 @@ app.post('/api/mobile-applications', requireAuth, requireDB, requireRole('admin'
     if (!custCheck.rows.length) { await conn.query('ROLLBACK'); return res.status(400).json({ error: 'Could not resolve customer. Please try searching again.' }); }
     const ins = await conn.query(`INSERT INTO mobile_loan_requests (customer_id,amount,interest_rate,term,term_frequency,purpose,notes,status,application_fee,source,created_by,branch_id) VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8,'manual',$9,$10) RETURNING id`,
       [custId,amount,interestRate,term,termFrequency||'monthly',purpose||null,notes||null,applicationFee||0,req.user.username,branchId||null]);
-    await conn.query('COMMIT');
-    // Record application fee immediately in financials if > 0
+    // Record application fee inside the transaction — if fee insert fails, whole application rolls back
     if((applicationFee||0) > 0){
-      // Get customer name for the record
-      const cust = await pool.query('SELECT name FROM mobile_customers WHERE id=$1',[custId]);
+      const cust = await conn.query('SELECT name FROM mobile_customers WHERE id=$1',[custId]);
       const custName = cust.rows[0]?.name||'';
-      await pool.query(
+      await conn.query(
         `INSERT INTO application_fee_payments (application_id,customer_name,amount,date,notes,added_by)
          VALUES ($1,$2,$3,CURRENT_DATE,$4,$5)`,
         [ins.rows[0].id, custName, applicationFee, `Application fee — ${custName}`, req.user.username]
       );
     }
+    await conn.query('COMMIT');
     await audit(req.user.id,req.user.username,'ADD_MOBILE_LOAN','MobileLoan',ins.rows[0].id,`$${amount} manual application${applicationFee>0?' — application fee $'+applicationFee:''}`,branchId);
     const { rows } = await pool.query(MOBILE_APP_JOIN+' WHERE l.id=$1',[ins.rows[0].id]);
     res.status(201).json(mapMobileApp(rows[0]));
