@@ -662,19 +662,35 @@ app.post('/api/admin-fees', requireAuth, requireDB, requireRole('admin','loan_of
   try {
     const { loanId, amount, date, notes } = req.body;
     if (!loanId || !amount || !date) return res.status(400).json({ error: 'loanId, amount and date required' });
-    const id = uuidv4();
     const isPenalty = (notes||'').toLowerCase().includes('auto penalty');
     const isFine    = (notes||'').toLowerCase().includes('fine');
+
+    // SERVER-SIDE DEDUPLICATION for auto-penalties
+    // Extract period number from notes e.g. "Auto penalty period 2 — ..."
+    if(isPenalty){
+      const periodMatch = (notes||'').match(/period\s+(\d+)/i);
+      if(periodMatch){
+        const { rows: existing } = await pool.query(
+          `SELECT id FROM admin_fee_payments
+           WHERE loan_id=$1 AND notes ILIKE $2 AND waived=FALSE`,
+          [loanId, `%auto penalty period ${periodMatch[1]}%`]
+        );
+        if(existing.length){
+          // Already exists — return the existing record silently (idempotent)
+          const { rows } = await pool.query('SELECT * FROM admin_fee_payments WHERE id=$1',[existing[0].id]);
+          return res.status(200).json(mapAdminFee(rows[0]));
+        }
+      }
+    }
+
+    const id = uuidv4();
     await pool.query(
       `INSERT INTO admin_fee_payments (id,loan_id,amount,date,notes,added_by) VALUES ($1,$2,$3,$4,$5,$6)`,
       [id, loanId, amount, date, notes||null, req.user.id]
     );
-    // Only update admin_fees_status for actual admin fees — not auto penalties or fines
     if(!isPenalty && !isFine){
       await pool.query(`UPDATE loans SET admin_fees_status='paid',updated_at=NOW() WHERE id=$1`, [loanId]);
     }
-    // When a manual fine is recorded, automatically settle any unsettled auto-penalties
-    // for that loan — any fine amount counts regardless of exact match
     if(isFine && loanId){
       await pool.query(
         `UPDATE admin_fee_payments SET settled=TRUE
