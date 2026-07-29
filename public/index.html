@@ -536,6 +536,7 @@ input::placeholder{color:var(--text3)}
       <div class="form-group"><label>Phone *</label><input id="mmaNewPhone" placeholder="077 123 4567"></div>
       <div class="form-group"><label>National ID</label><input id="mmaNewNationalId"></div>
       <div class="form-group"><label>Email</label><input id="mmaNewEmail" type="email"></div>
+      <div class="form-group full"><label>Address</label><input id="mmaNewAddress" placeholder="Street, City…"></div>
     </div>
     <div style="border-top:1px solid var(--border);margin:18px 0 16px;padding-top:16px" class="form-grid">
       <div class="form-group"><label>Loan Amount *</label><input id="mmaAmount" type="number" min="0" step="0.01" placeholder="500.00"></div>
@@ -1224,7 +1225,7 @@ function openAddMobileApp(){
   document.getElementById('mmaCustomerSearch').value='';
   document.getElementById('mmaCustomerResults').innerHTML='';
   document.getElementById('mmaSelectedCustomer').style.display='none';
-  ['mmaNewName','mmaNewPhone','mmaNewNationalId','mmaNewEmail','mmaAmount','mmaRate','mmaTerm','mmaPurpose','mmaNotes'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  ['mmaNewName','mmaNewPhone','mmaNewNationalId','mmaNewEmail','mmaNewAddress','mmaAmount','mmaRate','mmaTerm','mmaPurpose','mmaNotes'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   document.getElementById('mmaFee').value='0';
   document.getElementById('mmaFreq').value='monthly';
   setMobileAppCustomerTab('existing');
@@ -1296,7 +1297,7 @@ async function saveMobileApp(){
     const name=document.getElementById('mmaNewName').value.trim();
     const phone=document.getElementById('mmaNewPhone').value.trim();
     if(!name||!phone){toast('Customer name and phone are required','error');return;}
-    payload.newCustomer={name,phone,nationalId:document.getElementById('mmaNewNationalId').value.trim(),email:document.getElementById('mmaNewEmail').value.trim()};
+    payload.newCustomer={name,phone,nationalId:document.getElementById('mmaNewNationalId').value.trim(),email:document.getElementById('mmaNewEmail').value.trim(),address:document.getElementById('mmaNewAddress').value.trim()};
   }
   const btn=document.getElementById('mmaSaveBtn');
   btn.disabled=true;btn.textContent='Saving…';

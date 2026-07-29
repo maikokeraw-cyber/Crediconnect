@@ -892,7 +892,7 @@ app.post('/api/mobile-applications', requireAuth, requireDB, requireRole('admin'
       const ex = await conn.query('SELECT id FROM mobile_customers WHERE phone=$1', [newCustomer.phone]);
       if (ex.rows.length) { custId = ex.rows[0].id; }
       else {
-        const ins = await conn.query(`INSERT INTO mobile_customers (name,phone,national_id,email,status) VALUES ($1,$2,$3,$4,'active') RETURNING id`, [newCustomer.name,newCustomer.phone,newCustomer.nationalId||null,newCustomer.email||null]);
+        const ins = await conn.query(`INSERT INTO mobile_customers (name,phone,national_id,email,address,status) VALUES ($1,$2,$3,$4,$5,'active') RETURNING id`, [newCustomer.name,newCustomer.phone,newCustomer.nationalId||null,newCustomer.email||null,newCustomer.address||null]);
         custId = ins.rows[0].id;
       }
     }
