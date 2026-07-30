@@ -2613,7 +2613,9 @@ function renderRepayments(){
   sel.value=cur;
   let data=repayments.filter(r=>{const lo=loans.find(l=>l.id===r.loanId),c=lo?clients.find(c=>c.id===lo.clientId):null;return(!q||((c?.name||'').toLowerCase().includes(q)))&&(!lf||r.loanId===lf);}).sort((a,b)=>b.date.localeCompare(a.date));
   const tp=data.reduce((s,r)=>s+r.amount,0);
-  const afPaid=adminFeePayments.filter(a=>(!lf||a.loanId===lf));
+  // Exclude auto-penalties from this view — they are informational only
+  // and shown separately on the loan detail. Only real admin fees and fines appear here.
+  const afPaid=adminFeePayments.filter(a=>(!lf||a.loanId===lf) && !(a.notes||'').toLowerCase().includes('auto penalty'));
   const afPaidTotal=afPaid.reduce((s,a)=>s+a.amount,0);
   document.getElementById('repaySummary').innerHTML=`<div class="sum-item"><div class="sum-label">Repayments</div><div class="sum-val" style="color:var(--green)">$${fmt(tp)}</div></div><div class="sum-item"><div class="sum-label">Admin Fees Retained</div><div class="sum-val" style="color:var(--gold2)">$${fmt(afPaidTotal)}</div></div><div class="sum-item"><div class="sum-label">Transactions</div><div class="sum-val">${data.length+afPaid.length}</div></div><div class="sum-item"><div class="sum-label">Last Payment</div><div class="sum-val" style="font-size:14px">${data[0]?fmtDate(data[0].date):'--'}</div></div>`;
   const tb=document.getElementById('repayTbody');
