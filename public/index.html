@@ -1718,8 +1718,10 @@ function renderDashboard(){
           const rows=[];
           let totCap=0,totInt=0,totExp=0;
           for(let i=5;i>=0;i--){
-            const d=new Date(); d.setMonth(d.getMonth()-i);
-            const ms=d.toISOString().slice(0,7);
+            const d=new Date(); 
+            d.setDate(1); // prevent month overflow (e.g. July 31 - 1 = July 1, not June)
+            d.setMonth(d.getMonth()-i);
+            const ms=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); // local date, no UTC offset bug
             const label=d.toLocaleString('en',{month:'long',year:'numeric'});
             // Capital = sum of loan amounts disbursed this month
             const cap=loans.filter(l=>l.startDate&&l.startDate.startsWith(ms)).reduce((s,l)=>s+l.amount,0);
