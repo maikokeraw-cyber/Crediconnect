@@ -943,9 +943,9 @@ app.get('/api/application-fees', requireAuth, requireDB, requireRole('admin','lo
   try {
     const bf = getBranchFilter(req.user, req.query);
     let sql = `SELECT af.*, lr.branch_id FROM application_fee_payments af
-               JOIN mobile_loan_requests lr ON lr.id = af.application_id`;
+               LEFT JOIN mobile_loan_requests lr ON lr.id = af.application_id`;
     const params = [];
-    if(bf.value){ params.push(bf.value); sql += ` WHERE lr.branch_id = $${params.length}`; }
+    if(bf.value){ params.push(bf.value); sql += ` WHERE (lr.branch_id = $${params.length} OR lr.branch_id IS NULL)`; }
     sql += ' ORDER BY af.created_at DESC';
     const { rows } = await pool.query(sql, params);
     res.json(rows.map(r=>({ id:r.id, applicationId:r.application_id, customerName:r.customer_name||'', amount:Number(r.amount||0), date:(r.date||'').slice?.(0,10)||'', notes:r.notes||'', addedBy:r.added_by||'', createdAt:r.created_at?.toISOString()||'' })));

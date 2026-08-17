@@ -629,18 +629,16 @@ async function checkServer() {
 async function loadData() {
   if (!USE_DB || !authToken) return;
   try {
-    [clients, loans, repayments, expenses, adminFeePayments, branches] = await Promise.all([
+    [clients, loans, repayments, expenses, adminFeePayments, branches, _appFeesRaw] = await Promise.all([
       apiFetch('GET', '/api/clients'+branchParam()),
       apiFetch('GET', '/api/loans'+branchParam()),
       apiFetch('GET', '/api/repayments'+branchParam()),
       apiFetch('GET', '/api/expenses'+branchParam()),
       apiFetch('GET', '/api/admin-fees'+branchParam()),
       apiFetch('GET', '/api/branches'),
+      apiFetch('GET', '/api/application-fees'+branchParam()).catch(()=>[]),
     ]);
-    // Load application fees separately (non-critical — don't block if fails)
-    apiFetch('GET', '/api/application-fees'+branchParam()).then(r=>{
-      applicationFeePayments = r.map(f=>({id:f.id,applicationId:f.applicationId,customerName:f.customerName||'',amount:Number(f.amount||0),date:(f.date||'').slice(0,10),notes:f.notes||'',addedBy:f.addedBy||'',createdAt:f.createdAt||''}));
-    }).catch(()=>{});
+    applicationFeePayments = _appFeesRaw.map(f=>({id:f.id,applicationId:f.applicationId,customerName:f.customerName||'',amount:Number(f.amount||0),date:(f.date||'').slice(0,10),notes:f.notes||'',addedBy:f.addedBy||'',createdAt:f.createdAt||''}));
     window._penaltyRunning = false;          // reset lock
     window._penaltyAppliedThisSession = false; // allow penalties to re-run after fresh data load
     clients    = clients.map(normaliseClient);
