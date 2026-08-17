@@ -416,8 +416,8 @@ input::placeholder{color:var(--text3)}
 <!-- Loan Confirmation Modal -->
 <div class="modal-backdrop" id="mConfirmLoan"><div class="modal">
   <div class="modal-header"><div class="modal-title">⚠️ Confirm Loan Disbursement</div><button class="modal-close" onclick="CM('mConfirmLoan');OM('mAddLoan')">×</button></div>
-  <div class="modal-body"><div id="confirmLoanBody" style="font-size:13px"></div></div>
-  <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mConfirmLoan');OM('mAddLoan')">← Go Back &amp; Edit</button><button class="btn btn-primary" id="confirmLoanBtn" onclick="(()=>{const btn=this;btn.disabled=true;btn.textContent='Disbursing…';saveLoan().catch(()=>{btn.disabled=false;btn.textContent='✅ Confirm &amp; Disburse';})})()">✅ Confirm &amp; Disburse</button></div>
+  <div class="modal-body"><div id="confirmLoanBody" style="font-size:13px"></div><div id="confirmLoanError" style="display:none;margin-top:12px;padding:12px 14px;background:rgba(220,53,69,0.1);border:1px solid var(--red);border-radius:var(--radius-sm);color:var(--red);font-size:13px;line-height:1.5"></div></div>
+  <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mConfirmLoan');OM('mAddLoan')">← Go Back &amp; Edit</button><button class="btn btn-primary" id="confirmLoanBtn" onclick="(()=>{const btn=this;btn.disabled=true;btn.textContent='Disbursing…';document.getElementById('confirmLoanError').style.display='none';saveLoan().catch(()=>{btn.disabled=false;btn.textContent='✅ Confirm &amp; Disburse';})})()">✅ Confirm &amp; Disburse</button></div>
 </div></div>
 
 <div class="modal-backdrop" id="mAddRepay"><div class="modal">
@@ -552,6 +552,7 @@ input::placeholder{color:var(--text3)}
       <div class="form-group full"><label>Notes</label><textarea id="mmaNotes" placeholder="Additional notes…"></textarea></div>
     </div>
   </div>
+  <div id="mmaSaveError" style="display:none;margin:0 20px 12px;padding:12px 14px;background:rgba(220,53,69,0.1);border:1px solid var(--red);border-radius:var(--radius-sm);color:var(--red);font-size:13px;line-height:1.5"></div>
   <div class="modal-footer"><button class="btn btn-ghost" onclick="CM('mAddMobileApp')">Cancel</button><button class="btn btn-primary" id="mmaSaveBtn" onclick="saveMobileApp()">Save Application</button></div>
 </div></div>
 
@@ -1237,6 +1238,8 @@ function openAddMobileApp(){
     document.getElementById('mmaBranch').innerHTML='<option value="">— Select Branch —</option>'+branches.filter(b=>b.active!==false).map(b=>`<option value="${b.id}"${b.id===activeBranch?' selected':''}>${b.name}</option>`).join('');
     bWrap.style.display='';
   }else if(bWrap){bWrap.style.display='none';}
+  const _saveErrEl=document.getElementById('mmaSaveError');
+  if(_saveErrEl) _saveErrEl.style.display='none';
   OM('mAddMobileApp');
 }
 
@@ -1303,11 +1306,16 @@ async function saveMobileApp(){
     payload.newCustomer={name,phone,nationalId:document.getElementById('mmaNewNationalId').value.trim(),email:document.getElementById('mmaNewEmail').value.trim(),address:document.getElementById('mmaNewAddress').value.trim()};
   }
   const btn=document.getElementById('mmaSaveBtn');
+  const saveErrEl=document.getElementById('mmaSaveError');
+  if(saveErrEl) saveErrEl.style.display='none';
   btn.disabled=true;btn.textContent='Saving…';
   try{
     await apiFetch('POST','/api/mobile-applications',payload);
     CM('mAddMobileApp');toast('Application created — awaiting approval','success');renderMobileApps();
-  }catch(e){toast('Error: '+e.message,'error');}
+  }catch(e){
+    if(saveErrEl){saveErrEl.style.display='block';saveErrEl.innerHTML=`<strong>❌ Application was NOT saved</strong><br>${e.message}<br><small style="opacity:0.8;margin-top:4px;display:block">Please check all fields and try again. Do not close this form.</small>`;}
+    toast('Error: '+e.message,'error');
+  }
   finally{btn.disabled=false;btn.textContent='Save Application';}
 }
 
@@ -1357,6 +1365,7 @@ async function openMobileAppDetail(id){
       <div class="form-group"><label>Admin Fee *</label><input id="mmaApproveFee" type="number" min="0" step="0.01" value="0"></div>
       <div class="form-group"><label>Reviewer Notes (optional)</label><textarea id="mmaApproveNotes" rows="2" placeholder="Internal notes…"></textarea></div>
       <button class="btn btn-success" style="width:100%;margin-top:6px" id="mmaApproveBtn" onclick="approveMobileApp('${app.id}')">✅ Approve &amp; Disburse</button>
+      <div id="mmaApproveError" style="display:none;margin-top:10px;padding:12px 14px;background:rgba(220,53,69,0.1);border:1px solid var(--red);border-radius:var(--radius-sm);color:var(--red);font-size:13px;line-height:1.5"></div>
       <div class="form-group" style="margin-top:16px"><label>Rejection Reason (required to reject)</label><textarea id="mmaRejectReason" rows="2" placeholder="Why is this application being rejected?"></textarea></div>
       <button class="btn btn-danger" style="width:100%" id="mmaRejectBtn" onclick="rejectMobileApp('${app.id}')">✕ Reject Application</button>
     </div>`:`
@@ -1400,7 +1409,12 @@ async function approveMobileApp(id){
   try{
     await apiFetch('PUT',`/api/mobile-applications/${id}/approve`,{adminFees:fee,startDate,reviewerNotes:notes,branchId});
     CM('mMobileAppDetail');toast('Application approved — loan created in Loan Portfolio','success');renderMobileApps();
-  }catch(e){toast('Error: '+e.message,'error');btn.disabled=false;btn.textContent='✅ Approve & Disburse';}
+  }catch(e){
+    const errEl=document.getElementById('mmaApproveError');
+    if(errEl){errEl.style.display='block';errEl.innerHTML=`<strong>❌ Approval failed — loan was NOT created</strong><br>${e.message}<br><small style="opacity:0.8;margin-top:4px;display:block">The application has not changed status. Please check the details above and try again.</small>`;}
+    toast('Approval failed: '+e.message,'error');
+    btn.disabled=false;btn.textContent='✅ Approve & Disburse';
+  }
 }
 
 async function rejectMobileApp(id){
@@ -2142,7 +2156,13 @@ async function saveLoan(){
     addAudit('DISBURSE_LOAN','Loan',r.id,`${clientForAudit?clientForAudit.name+' — ':''}$${fmt(amount)} | Admin fee: $${fmt(adminFees)} | Cash to client: $${fmt(cashToCustomer)}`);
     CM('mConfirmLoan');CM('mAddLoan');renderLoans();updateStorageInfo();
     toast('Loan disbursed — $'+fmt(cashToCustomer)+' to customer'+(adminFees>0?', $'+fmt(adminFees)+' admin fee retained in business':''),'success');
-  }).catch(e=>toast('Error: '+e.message,'error'));
+  }).catch(e=>{
+    const errEl=document.getElementById('confirmLoanError');
+    if(errEl){errEl.style.display='block';errEl.innerHTML=`<strong>❌ Disbursement failed — loan was NOT saved</strong><br>${e.message}<br><small style="opacity:0.8;margin-top:4px;display:block">Please try again. If the problem persists, note the loan details and contact your administrator.</small>`;}
+    toast('Disbursement failed: '+e.message,'error');
+    const btn=document.getElementById('confirmLoanBtn');
+    if(btn){btn.disabled=false;btn.textContent='✅ Confirm & Disburse';}
+  });
 }
 
 // ── Amortisation helpers ─────────────────────────────────────────
