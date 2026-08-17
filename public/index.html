@@ -3128,25 +3128,27 @@ function renderReports(){
   document.getElementById('repContent').innerHTML=`
     <!-- Admin Fees Section -->
     <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:22px">
-      <div style="font-size:13px;font-weight:600;margin-bottom:14px">Admin Fees Overview</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:14px">Fees Overview</div>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
         ${(()=>{
-          // Exclude auto-penalties from all admin fee totals in Reports
           const realFees=adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty'));
           const thisM=new Date().toISOString().slice(0,7);
           const lastMD=new Date();lastMD.setDate(1);lastMD.setMonth(lastMD.getMonth()-1);const lastM=lastMD.toISOString().slice(0,7);
           const thisMonthAF=realFees.filter(a=>a.date.startsWith(thisM)).reduce((s,a)=>s+a.amount,0);
           const lastMonthAF=realFees.filter(a=>a.date.startsWith(lastM)).reduce((s,a)=>s+a.amount,0);
           const totalAF=realFees.reduce((s,a)=>s+a.amount,0);
+          const thisMonthApp=applicationFeePayments.filter(a=>a.date.startsWith(thisM)).reduce((s,a)=>s+a.amount,0);
+          const lastMonthApp=applicationFeePayments.filter(a=>a.date.startsWith(lastM)).reduce((s,a)=>s+a.amount,0);
+          const totalApp=applicationFeePayments.reduce((s,a)=>s+a.amount,0);
           return [
-            ['This Month','$'+fmt(thisMonthAF),'var(--gold2)'],
-            ['Last Month','$'+fmt(lastMonthAF),'var(--text2)'],
-            ['All Time','$'+fmt(totalAF),'var(--green)'],
-            ['All Retained','$'+fmt(totalAF),'var(--green)']
-          ].map(([l,v,c])=>`<div style="background:var(--surface);padding:14px;border-radius:var(--radius-sm);border:1px solid var(--border)"><div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:6px">${l}</div><div style="font-size:20px;font-weight:700;font-family:'DM Mono',monospace;color:${c}">${v}</div></div>`).join('');
+            ['This Month','$'+fmt(thisMonthAF+thisMonthApp),'var(--gold2)',`Admin $${fmt(thisMonthAF)} · App $${fmt(thisMonthApp)}`],
+            ['Last Month','$'+fmt(lastMonthAF+lastMonthApp),'var(--text2)',`Admin $${fmt(lastMonthAF)} · App $${fmt(lastMonthApp)}`],
+            ['Admin Fees (Total)','$'+fmt(totalAF),'var(--gold2)','All time retained'],
+            ['Application Fees (Total)','$'+fmt(totalApp),'var(--purple)','Collected at intake'],
+          ].map(([l,v,c,sub])=>`<div style="background:var(--surface);padding:14px;border-radius:var(--radius-sm);border:1px solid var(--border)"><div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:6px">${l}</div><div style="font-size:20px;font-weight:700;font-family:'DM Mono',monospace;color:${c}">${v}</div><div style="font-size:10px;color:var(--text3);margin-top:4px">${sub}</div></div>`).join('');
         })()}
       </div>
-      <div style="margin-top:14px;max-height:180px;overflow-y:auto">
+      <div style="margin-top:14px;max-height:240px;overflow-y:auto">
         <table style="width:100%;font-size:12.5px;border-collapse:collapse">
           <thead><tr>
             <th style="text-align:left;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px">Date</th>
@@ -3155,21 +3157,34 @@ function renderReports(){
             <th style="text-align:left;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px">Notes</th>
             <th style="text-align:right;padding:7px 10px;background:var(--surface);color:var(--text3);font-size:10px">Amount</th>
           </tr></thead>
-          <tbody>${adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty')).sort((a,b)=>b.date.localeCompare(a.date)).map(a=>{
-            const lo=loans.find(l=>l.id===a.loanId),c=lo?clients.find(c=>c.id===lo.clientId):null;
-            const isFine=(a.notes||'').toLowerCase().includes('fine');
-            const typeLabel=isFine
-              ? `<span style="background:rgba(249,115,22,0.15);color:#f97316;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700">FINE</span>`
-              : `<span style="background:var(--gold-dim);color:var(--gold2);padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700">ADMIN FEE</span>`;
-            const amtColor=isFine?'#f97316':'var(--gold2)';
-            return`<tr style="border-bottom:1px solid var(--border)">
-              <td style="padding:7px 10px;color:var(--text2)">${fmtDate(a.date)}</td>
-              <td style="padding:7px 10px">${c?c.name:'--'}</td>
-              <td style="padding:7px 10px">${typeLabel}</td>
-              <td style="padding:7px 10px;color:var(--text3);font-size:11px">${a.notes||'--'}</td>
-              <td style="padding:7px 10px;text-align:right;color:${amtColor};font-family:'DM Mono',monospace;font-weight:600">+$${fmt(a.amount)}</td>
-            </tr>`;
-          }).join('')||'<tr><td colspan="5" style="padding:14px;text-align:center;color:var(--text3)">No entries yet</td></tr>'}</tbody>
+          <tbody>${(()=>{
+            const realFees=adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty'));
+            const adminRows=realFees.map(a=>{
+              const lo=loans.find(l=>l.id===a.loanId),c=lo?clients.find(c=>c.id===lo.clientId):null;
+              const isFine=(a.notes||'').toLowerCase().includes('fine');
+              const typeLabel=isFine
+                ? `<span style="background:rgba(249,115,22,0.15);color:#f97316;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700">FINE</span>`
+                : `<span style="background:var(--gold-dim);color:var(--gold2);padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700">ADMIN FEE</span>`;
+              return{date:a.date,clientName:c?c.name:'--',typeLabel,notes:a.notes||'--',amount:a.amount,color:isFine?'#f97316':'var(--gold2)'};
+            });
+            const appRows=applicationFeePayments.map(a=>({
+              date:a.date,
+              clientName:a.customerName||'--',
+              typeLabel:`<span style="background:var(--purple-dim);color:var(--purple);padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700">APP FEE</span>`,
+              notes:a.notes||'--',
+              amount:a.amount,
+              color:'var(--purple)'
+            }));
+            const allRows=[...adminRows,...appRows].sort((a,b)=>b.date.localeCompare(a.date));
+            if(!allRows.length) return '<tr><td colspan="5" style="padding:14px;text-align:center;color:var(--text3)">No entries yet</td></tr>';
+            return allRows.map(r=>`<tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:7px 10px;color:var(--text2)">${fmtDate(r.date)}</td>
+              <td style="padding:7px 10px">${r.clientName}</td>
+              <td style="padding:7px 10px">${r.typeLabel}</td>
+              <td style="padding:7px 10px;color:var(--text3);font-size:11px">${r.notes}</td>
+              <td style="padding:7px 10px;text-align:right;color:${r.color};font-family:'DM Mono',monospace;font-weight:600">+$${fmt(r.amount)}</td>
+            </tr>`).join('');
+          })()}</tbody>
         </table>
       </div>
     </div>
