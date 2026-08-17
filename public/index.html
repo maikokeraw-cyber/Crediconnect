@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Credinova v5.1 — Financial Solutions</title>
+<title>Credinova v5.2 — Financial Solutions</title>
 <!-- Fonts loaded non-blocking so slow network never hangs the app -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -245,7 +245,7 @@ input::placeholder{color:var(--text3)}
   </div>
   <div id="appLayout">
     <nav id="sidebar">
-      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v5.1</div></div>
+      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v5.2</div></div>
       <div class="nav">
         <div class="nav-section">Overview</div>
         <div class="nav-item active" id="nav-dashboard" onclick="navigate('dashboard')" class="nav-item-admin-only"><span class="icon">📊</span>Dashboard</div>
@@ -268,7 +268,7 @@ input::placeholder{color:var(--text3)}
         <div class="nav-item" id="nav-profile" onclick="navigate('profile')"><span class="icon">⚙️</span>My Profile</div>
       </div>
       <div style="padding:6px 14px 2px;text-align:right">
-        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:0.5px">v5.1</span>
+        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:0.5px">v5.2</span>
       </div>
       <div class="sidebar-user">
         <div class="sidebar-avatar" id="sbAvatar">?</div>
@@ -762,7 +762,7 @@ function enterApp(){
     }
   }
   updateStorageInfo();
-  const startPage = currentUser?.role==='loan_officer' ? 'clients' : 'dashboard';
+  const startPage = 'dashboard';
   navigate(startPage);
 }
 
@@ -1000,7 +1000,7 @@ function updateStorageInfo(){
     ? `<span style="color:var(--green)">● Supabase PostgreSQL</span>`
     : `<span style="color:var(--amber)">● localStorage (offline)</span>`;
   const bLabel=isSuperAdmin()?(activeBranch?`Branch:${branches.find(b=>b.id===activeBranch)?.name||activeBranch.slice(-4)}`:'All'):(currentUser?.branchId?`Branch:${branches.find(b=>b.id===currentUser.branchId)?.name||'ID:'+currentUser.branchId.slice(-4)}`:'⚠️ No Branch');
-document.getElementById('storageInfo').innerHTML=`v5.1 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
+document.getElementById('storageInfo').innerHTML=`v5.2 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
 }
 
 // ================================================================
@@ -1025,7 +1025,7 @@ function navigate(page){
   if(page==='users'&&can('admin'))      act.innerHTML=`<button class="btn btn-primary" onclick="openAddUser()">＋ Add User</button>`;
   const fns={dashboard:renderDashboard,clients:renderClients,loans:renderLoans,repayments:renderRepayments,duePayments:renderDuePayments,mobileApps:renderMobileApps,expenses:renderExpenses,financials:renderFinancials,reports:renderReports,users:renderUsers,audit:renderAudit,backup:renderBackup,profile:renderProfile};
   // Loan officer cannot see dashboard — redirect to clients
-  if(page==='dashboard'&&currentUser?.role==='loan_officer'){ navigate('clients'); return; }
+  // loan officers now have their own dashboard view — no redirect needed
   // Refresh from DB on data pages so branch filter always applies
   const refreshPages = ['dashboard','clients','loans','duePayments','repayments','mobileApps','expenses','financials','reports'];
   if(USE_DB && refreshPages.includes(page)){
@@ -1649,7 +1649,222 @@ function renderDuePayments(){
   updateDueBadge();
 }
 // ================================================================
+// ================================================================
+//  LOAN OFFICER DASHBOARD (v5.2)
+// ================================================================
+async function renderLoanOfficerDashboard(){
+  const pg=document.getElementById('page-dashboard');
+  const myBranch=branches.find(b=>b.id===myBranchId());
+  const branchName=myBranch?myBranch.name:'Your Branch';
+
+  // Ensure mobile apps are loaded for pending count
+  if(!_mobileApps.length && USE_DB){
+    try{ _mobileApps=await apiFetch('GET','/api/mobile-applications'); updateMobileAppsBadge(); }catch(e){}
+  }
+
+  // Core data — already branch-filtered from API
+  const activeLns   = loans.filter(l=>getLoanStatus(l)==='active');
+  const defaultedLns= loans.filter(l=>getLoanStatus(l)==='defaulted');
+  const allActive   = [...activeLns,...defaultedLns];
+  const overdueLns  = loans.filter(l=>isLoanOverdue(l));
+  const pendingApps = _mobileApps.filter(a=>a.status==='pending');
+
+  // Metric values
+  const loanBook          = allActive.reduce((s,l)=>s+l.amount,0);
+  const outstanding       = allActive.reduce((s,l)=>s+getLoanBalance(l.id),0);
+  const thisMonthStr      = new Date().toISOString().slice(0,7);
+  const collectedThisMon  = repayments.filter(r=>r.date&&r.date.startsWith(thisMonthStr)).reduce((s,r)=>s+r.amount,0);
+  const disbursedThisMon  = loans.filter(l=>l.startDate&&l.startDate.startsWith(thisMonthStr)).reduce((s,l)=>s+l.amount,0);
+
+  // Expected collections this/next month
+  const nextMonthDate=new Date(); nextMonthDate.setDate(1); nextMonthDate.setMonth(nextMonthDate.getMonth()+1);
+  const nextMonthStr=nextMonthDate.getFullYear()+'-'+String(nextMonthDate.getMonth()+1).padStart(2,'0');
+  let thisMInt=0,thisMPrin=0,nextMInt=0,nextMPrin=0;
+  activeLns.forEach(loan=>{
+    buildAmortisation(loan).forEach(row=>{
+      if(row.dueDate.startsWith(thisMonthStr)){thisMInt+=row.interest;thisMPrin+=row.principal;}
+      if(row.dueDate.startsWith(nextMonthStr)){nextMInt+=row.interest;nextMPrin+=row.principal;}
+    });
+  });
+  const thisMonthName=new Date().toLocaleString('en',{month:'long',year:'numeric'});
+  const nextMonthName=nextMonthDate.toLocaleString('en',{month:'long',year:'numeric'});
+
+  // Disbursed per month — last 3 months
+  const disbMonths=[];
+  for(let i=2;i>=0;i--){
+    const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-i);
+    const ms=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+    const label=d.toLocaleString('en',{month:'long',year:'numeric'});
+    const mLoans=loans.filter(l=>l.startDate&&l.startDate.startsWith(ms));
+    disbMonths.push({label,count:mLoans.length,amount:mLoans.reduce((s,l)=>s+l.amount,0)});
+  }
+
+  // Recent repayments — last 5
+  const recentRep=[...repayments].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
+  // Recent disbursements — last 5
+  const recentDis=[...loans].sort((a,b)=>b.startDate.localeCompare(a.startDate)).slice(0,5);
+
+  // Overdue loans enriched with client name
+  const overdueRows=overdueLns.map(l=>{
+    const c=clients.find(c=>c.id===l.clientId);
+    const bal=getLoanBalance(l.id);
+    const lastPay=[...repayments].filter(r=>r.loanId===l.id).sort((a,b)=>b.date.localeCompare(a.date))[0];
+    return{l,c,bal,lastPay};
+  }).sort((a,b)=>b.bal-a.bal);
+
+  pg.innerHTML=`
+    <!-- Branch header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <div>
+        <div style="font-size:18px;font-weight:700">📊 ${branchName} Overview</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:2px">${new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</div>
+      </div>
+      <div style="font-size:12px;color:var(--text3);background:var(--surface);padding:6px 12px;border-radius:20px;border:1px solid var(--border)">${activeLns.length} active · ${defaultedLns.length} defaulted · ${loans.filter(l=>getLoanStatus(l)==='completed').length} completed</div>
+    </div>
+
+    <!-- 6 Metric Cards -->
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:22px">
+      <div class="stat-card gold"><span class="stat-icon">📚</span><div class="stat-label">Loan Book</div><div class="stat-value">$${fmt(loanBook)}</div><div class="stat-sub">${allActive.length} active loan${allActive.length!==1?'s':''}</div></div>
+      <div class="stat-card red"><span class="stat-icon">⚡</span><div class="stat-label">Outstanding</div><div class="stat-value">$${fmt(outstanding)}</div><div class="stat-sub">Balance to collect</div></div>
+      <div class="stat-card green"><span class="stat-icon">📥</span><div class="stat-label">Collected This Month</div><div class="stat-value">$${fmt(collectedThisMon)}</div><div class="stat-sub">${repayments.filter(r=>r.date&&r.date.startsWith(thisMonthStr)).length} payment${repayments.filter(r=>r.date&&r.date.startsWith(thisMonthStr)).length!==1?'s':''}</div></div>
+      <div class="stat-card blue"><span class="stat-icon">💸</span><div class="stat-label">Disbursed This Month</div><div class="stat-value">$${fmt(disbursedThisMon)}</div><div class="stat-sub">${loans.filter(l=>l.startDate&&l.startDate.startsWith(thisMonthStr)).length} loan${loans.filter(l=>l.startDate&&l.startDate.startsWith(thisMonthStr)).length!==1?'s':''}</div></div>
+      <div class="stat-card red" style="cursor:pointer" onclick="navigate('duePayments')"><span class="stat-icon">⚠️</span><div class="stat-label">Overdue Loans</div><div class="stat-value" style="color:var(--red)">${overdueLns.length}</div><div class="stat-sub">Tap to view due payments</div></div>
+      <div class="stat-card" style="cursor:pointer;border-color:var(--purple);background:rgba(139,92,246,0.06)" onclick="navigate('mobileApps')"><span class="stat-icon">📱</span><div class="stat-label">Pending Applications</div><div class="stat-value" style="color:var(--purple)">${pendingApps.length}</div><div class="stat-sub">Awaiting approval</div></div>
+    </div>
+
+    <!-- Expected Collections -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:22px">
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <span style="font-size:13px;font-weight:600">📅 Expected — ${thisMonthName}</span>
+          <span style="font-size:11px;background:var(--amber-dim);color:var(--amber);padding:2px 8px;border-radius:10px;font-weight:600">This Month</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          ${[['Interest','$'+fmt(thisMInt),'var(--amber)'],['Principal','$'+fmt(thisMPrin),'var(--blue)'],['Total Due','$'+fmt(thisMInt+thisMPrin),'var(--green)']].map(([l,v,c])=>`
+          <div style="background:var(--surface);border-radius:var(--radius-sm);padding:10px;text-align:center;border:1px solid var(--border)">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:4px">${l}</div>
+            <div style="font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:${c}">${v}</div>
+          </div>`).join('')}
+        </div>
+        <div style="margin-top:10px;font-size:11px;color:var(--text3)">Across ${activeLns.length} active loan${activeLns.length!==1?'s':''}</div>
+      </div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <span style="font-size:13px;font-weight:600">📅 Expected — ${nextMonthName}</span>
+          <span style="font-size:11px;background:var(--blue-dim);color:var(--blue);padding:2px 8px;border-radius:10px;font-weight:600">Next Month</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          ${[['Interest','$'+fmt(nextMInt),'var(--amber)'],['Principal','$'+fmt(nextMPrin),'var(--blue)'],['Total Due','$'+fmt(nextMInt+nextMPrin),'var(--green)']].map(([l,v,c])=>`
+          <div style="background:var(--surface);border-radius:var(--radius-sm);padding:10px;text-align:center;border:1px solid var(--border)">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:4px">${l}</div>
+            <div style="font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:${c}">${v}</div>
+          </div>`).join('')}
+        </div>
+        <div style="margin-top:10px;font-size:11px;color:var(--text3)">Projected from amortisation schedules</div>
+      </div>
+    </div>
+
+    <!-- Disbursed Per Month -->
+    <div class="card" style="margin-bottom:22px">
+      <div class="card-header"><span class="card-title">💸 Disbursed Per Month</span><span style="font-size:11px;color:var(--text3)">Last 3 months</span></div>
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Month</th>
+          <th style="text-align:right">Loans Issued</th>
+          <th style="text-align:right;color:var(--gold2)">Total Disbursed</th>
+          <th style="text-align:right;color:var(--amber)">Avg Loan Size</th>
+        </tr></thead>
+        <tbody>
+          ${disbMonths.map(m=>`
+          <tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:10px 14px;font-weight:500">${m.label}</td>
+            <td style="padding:10px 14px;text-align:right;color:var(--text2)">${m.count||'—'}</td>
+            <td style="padding:10px 14px;text-align:right;font-family:'DM Mono',monospace;color:var(--gold2);font-weight:600">${m.amount>0?'$'+fmt(m.amount):'—'}</td>
+            <td style="padding:10px 14px;text-align:right;font-family:'DM Mono',monospace;color:var(--amber)">${m.count>0?'$'+fmt(m.amount/m.count):'—'}</td>
+          </tr>`).join('')}
+          <tr style="background:var(--surface);font-weight:700">
+            <td style="padding:10px 14px">Total</td>
+            <td style="padding:10px 14px;text-align:right">${disbMonths.reduce((s,m)=>s+m.count,0)}</td>
+            <td style="padding:10px 14px;text-align:right;font-family:'DM Mono',monospace;color:var(--gold2)">$${fmt(disbMonths.reduce((s,m)=>s+m.amount,0))}</td>
+            <td style="padding:10px 14px;text-align:right;color:var(--text3)">—</td>
+          </tr>
+        </tbody>
+      </table></div>
+    </div>
+
+    <!-- Overdue Loans -->
+    <div class="card" style="margin-bottom:22px">
+      <div class="card-header">
+        <span class="card-title">⚠️ Overdue Loans</span>
+        <button class="btn btn-ghost btn-sm" onclick="navigate('duePayments')">View Due Payments →</button>
+      </div>
+      ${overdueRows.length?`
+      <div class="table-wrap"><table>
+        <thead><tr><th>Client</th><th style="text-align:right">Loan Amount</th><th style="text-align:right;color:var(--red)">Outstanding</th><th>Last Payment</th><th></th></tr></thead>
+        <tbody>
+          ${overdueRows.map(({l,c,bal,lastPay})=>`
+          <tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openLoanDetail('${l.id}')">
+            <td style="padding:10px 14px">
+              <div class="name-cell">
+                <div class="avatar" style="background:${avatarColor(c?c.name:'?')}">${initials(c?c.name:'?')}</div>
+                <div>
+                  <div style="font-weight:600;font-size:13px">${c?c.name:'Unknown'}</div>
+                  <div style="font-size:11px;color:var(--text3)">${c?c.phone:''}</div>
+                </div>
+              </div>
+            </td>
+            <td style="padding:10px 14px;text-align:right;font-family:'DM Mono',monospace">$${fmt(l.amount)}</td>
+            <td style="padding:10px 14px;text-align:right;font-family:'DM Mono',monospace;color:var(--red);font-weight:700">$${fmt(bal)}</td>
+            <td style="padding:10px 14px;color:var(--text3);font-size:12px">${lastPay?fmtDate(lastPay.date):'No payments'}</td>
+            <td style="padding:10px 14px" onclick="event.stopPropagation()">
+              ${can('write')?`<button class="btn btn-success btn-sm" onclick="openAddRepayForLoan('${l.id}')">+ Pay</button>`:''}
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>`
+      :`<div style="padding:30px;text-align:center;color:var(--green)">✅ No overdue loans</div>`}
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="two-col">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Recent Repayments</span><button class="btn btn-ghost btn-sm" onclick="navigate('repayments')">View All →</button></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Client</th><th style="text-align:right;color:var(--green)">Amount</th><th>Date</th></tr></thead>
+          <tbody>
+            ${recentRep.length?recentRep.map(r=>{
+              const rl=loans.find(l=>l.id===r.loanId);
+              const rc=rl?clients.find(c=>c.id===rl.clientId):null;
+              return`<tr style="border-bottom:1px solid var(--border)">
+                <td style="padding:9px 14px;font-size:13px">${rc?rc.name:'—'}</td>
+                <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;color:var(--green);font-weight:600">$${fmt(r.amount)}</td>
+                <td style="padding:9px 14px;font-size:12px;color:var(--text3)">${fmtDate(r.date)}</td>
+              </tr>`;}).join('')
+            :`<tr><td colspan="3" style="padding:20px;text-align:center;color:var(--text3)">No repayments yet</td></tr>`}
+          </tbody>
+        </table></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Recent Disbursements</span><button class="btn btn-ghost btn-sm" onclick="navigate('loans')">View All →</button></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Client</th><th style="text-align:right;color:var(--gold2)">Amount</th><th>Date</th></tr></thead>
+          <tbody>
+            ${recentDis.length?recentDis.map(l=>{
+              const dc=clients.find(c=>c.id===l.clientId);
+              return`<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openLoanDetail('${l.id}')">
+                <td style="padding:9px 14px;font-size:13px">${dc?dc.name:'—'}</td>
+                <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;color:var(--gold2);font-weight:600">$${fmt(l.amount)}</td>
+                <td style="padding:9px 14px;font-size:12px;color:var(--text3)">${fmtDate(l.startDate)}</td>
+              </tr>`;}).join('')
+            :`<tr><td colspan="3" style="padding:20px;text-align:center;color:var(--text3)">No loans yet</td></tr>`}
+          </tbody>
+        </table></div>
+      </div>
+    </div>`;
+}
+
 function renderDashboard(){
+  if(!can('admin')){ renderLoanOfficerDashboard(); return; }
   const al=loans.filter(l=>getLoanStatus(l)==='active');
   const td=loans.reduce((s,l)=>s+l.amount,0),tc=repayments.reduce((s,r)=>s+r.amount,0);
   const te=expenses.reduce((s,e)=>s+e.amount,0),to=al.reduce((s,l)=>s+getLoanBalance(l.id),0);
