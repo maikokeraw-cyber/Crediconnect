@@ -641,6 +641,7 @@ async function loadData() {
     applicationFeePayments = _appFeesRaw.map(f=>({id:f.id,applicationId:f.applicationId,customerName:f.customerName||'',amount:Number(f.amount||0),date:(f.date||'').slice(0,10),notes:f.notes||'',addedBy:f.addedBy||'',createdAt:f.createdAt||''}));
     window._penaltyRunning = false;          // reset lock
     window._penaltyAppliedThisSession = false; // allow penalties to re-run after fresh data load
+    clearAmortCache(); // clear amortisation cache — fresh data, fresh schedules
     clients    = clients.map(normaliseClient);
     loans      = loans.map(normaliseLoan);
     repayments = repayments.map(normaliseRepayment);
@@ -2349,7 +2350,15 @@ function skipSunday(d){
   return d;
 }
 
+// ── Amortisation cache — keyed by loan fields that affect the schedule
+// Cleared automatically when loan terms change (edit/delete)
+const _amortCache = new Map();
+function _amortKey(loan){ return `${loan.id}|${loan.startDate}|${loan.repaymentStartDate||''}|${loan.term}|${loan.termFrequency||'monthly'}|${loan.amount}|${loan.interestRate}`; }
+function clearAmortCache(loanId){ if(loanId){ for(const k of _amortCache.keys()) if(k.startsWith(loanId+'|')) _amortCache.delete(k); } else _amortCache.clear(); }
+
 function buildAmortisation(loan){
+  const key = _amortKey(loan);
+  if(_amortCache.has(key)) return _amortCache.get(key);
   const totalInterest    = loan.amount * loan.interestRate / 100;
   const periodicInterest = totalInterest / loan.term;
   const periodicPrincipal= loan.amount   / loan.term;
@@ -2384,6 +2393,7 @@ function buildAmortisation(loan){
       rows.push({ month:m, dueDate:toLocalDate(due), payment:periodicPayment, principal:periodicPrincipal, interest:periodicInterest, balance });
     }
   }
+  _amortCache.set(key, rows);
   return rows;
 }
 
@@ -2749,11 +2759,13 @@ async function saveEditLoan(){
       await apiFetch('PUT',`/api/loans/${_editLoanId}`,{amount,interestRate:rate,term,termFrequency:freq,startDate:date,repaymentStartDate:repayStart||null,status,purpose,adminFees,notes});
       Object.assign(loan, updated); saveAll();
       addAudit('EDIT_LOAN','Loan',_editLoanId,lDetail);
+      clearAmortCache(_editLoanId);
       CM('mEditLoan'); renderLoans(); toast('Loan updated','success');
     }catch(e){ toast('Error: '+e.message,'error'); }finally{ unlockModal(_selb); }
   } else {
     Object.assign(loan, updated); saveAll();
     addAudit('EDIT_LOAN','Loan',_editLoanId,lDetail);
+    clearAmortCache(_editLoanId);
     CM('mEditLoan'); renderLoans(); toast('Loan updated','success');
     unlockModal(_selb);
   }
