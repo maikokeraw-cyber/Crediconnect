@@ -1676,19 +1676,6 @@ async function renderLoanOfficerDashboard(){
   const collectedThisMon  = repayments.filter(r=>r.date&&r.date.startsWith(thisMonthStr)).reduce((s,r)=>s+r.amount,0);
   const disbursedThisMon  = loans.filter(l=>l.startDate&&l.startDate.startsWith(thisMonthStr)).reduce((s,l)=>s+l.amount,0);
 
-  // Expected collections this/next month
-  const nextMonthDate=new Date(); nextMonthDate.setDate(1); nextMonthDate.setMonth(nextMonthDate.getMonth()+1);
-  const nextMonthStr=nextMonthDate.getFullYear()+'-'+String(nextMonthDate.getMonth()+1).padStart(2,'0');
-  let thisMInt=0,thisMPrin=0,nextMInt=0,nextMPrin=0;
-  activeLns.forEach(loan=>{
-    buildAmortisation(loan).forEach(row=>{
-      if(row.dueDate.startsWith(thisMonthStr)){thisMInt+=row.interest;thisMPrin+=row.principal;}
-      if(row.dueDate.startsWith(nextMonthStr)){nextMInt+=row.interest;nextMPrin+=row.principal;}
-    });
-  });
-  const thisMonthName=new Date().toLocaleString('en',{month:'long',year:'numeric'});
-  const nextMonthName=nextMonthDate.toLocaleString('en',{month:'long',year:'numeric'});
-
   // Disbursed per month — last 3 months
   const disbMonths=[];
   for(let i=2;i>=0;i--){
@@ -1730,38 +1717,6 @@ async function renderLoanOfficerDashboard(){
       <div class="stat-card blue"><span class="stat-icon">💸</span><div class="stat-label">Disbursed This Month</div><div class="stat-value">$${fmt(disbursedThisMon)}</div><div class="stat-sub">${loans.filter(l=>l.startDate&&l.startDate.startsWith(thisMonthStr)).length} loan${loans.filter(l=>l.startDate&&l.startDate.startsWith(thisMonthStr)).length!==1?'s':''}</div></div>
       <div class="stat-card red" style="cursor:pointer" onclick="navigate('duePayments')"><span class="stat-icon">⚠️</span><div class="stat-label">Overdue Loans</div><div class="stat-value" style="color:var(--red)">${overdueLns.length}</div><div class="stat-sub">Tap to view due payments</div></div>
       <div class="stat-card" style="cursor:pointer;border-color:var(--purple);background:rgba(139,92,246,0.06)" onclick="navigate('mobileApps')"><span class="stat-icon">📱</span><div class="stat-label">Pending Applications</div><div class="stat-value" style="color:var(--purple)">${pendingApps.length}</div><div class="stat-sub">Awaiting approval</div></div>
-    </div>
-
-    <!-- Expected Collections -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:22px">
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-          <span style="font-size:13px;font-weight:600">📅 Expected — ${thisMonthName}</span>
-          <span style="font-size:11px;background:var(--amber-dim);color:var(--amber);padding:2px 8px;border-radius:10px;font-weight:600">This Month</span>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-          ${[['Interest','$'+fmt(thisMInt),'var(--amber)'],['Principal','$'+fmt(thisMPrin),'var(--blue)'],['Total Due','$'+fmt(thisMInt+thisMPrin),'var(--green)']].map(([l,v,c])=>`
-          <div style="background:var(--surface);border-radius:var(--radius-sm);padding:10px;text-align:center;border:1px solid var(--border)">
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:4px">${l}</div>
-            <div style="font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:${c}">${v}</div>
-          </div>`).join('')}
-        </div>
-        <div style="margin-top:10px;font-size:11px;color:var(--text3)">Across ${activeLns.length} active loan${activeLns.length!==1?'s':''}</div>
-      </div>
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-          <span style="font-size:13px;font-weight:600">📅 Expected — ${nextMonthName}</span>
-          <span style="font-size:11px;background:var(--blue-dim);color:var(--blue);padding:2px 8px;border-radius:10px;font-weight:600">Next Month</span>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-          ${[['Interest','$'+fmt(nextMInt),'var(--amber)'],['Principal','$'+fmt(nextMPrin),'var(--blue)'],['Total Due','$'+fmt(nextMInt+nextMPrin),'var(--green)']].map(([l,v,c])=>`
-          <div style="background:var(--surface);border-radius:var(--radius-sm);padding:10px;text-align:center;border:1px solid var(--border)">
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:4px">${l}</div>
-            <div style="font-family:'DM Mono',monospace;font-size:15px;font-weight:700;color:${c}">${v}</div>
-          </div>`).join('')}
-        </div>
-        <div style="margin-top:10px;font-size:11px;color:var(--text3)">Projected from amortisation schedules</div>
-      </div>
     </div>
 
     <!-- Disbursed Per Month -->
