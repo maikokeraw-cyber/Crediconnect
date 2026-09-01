@@ -1475,17 +1475,6 @@ function renderDuePayments(){
   const tzd=todayZW(), tzTomorrow=tomorrowZW();
   const freq=document.getElementById('dueFreqFilter')?.value||'';
 
-  // TEMPORARY DEBUG — remove after issue is identified
-  if(can('admin')){
-    const missingClients=loans.filter(l=>getLoanStatus(l)!=='completed'&&!clients.find(c=>c.id===l.clientId));
-    const existingDebug=document.getElementById('_duePgDebug');
-    const debugEl=existingDebug||document.createElement('div');
-    debugEl.id='_duePgDebug';
-    debugEl.style.cssText='background:rgba(59,130,246,0.1);border:1px solid var(--blue);border-radius:6px;padding:8px 14px;margin-bottom:12px;font-size:11px;color:var(--text2);font-family:monospace';
-    debugEl.innerHTML=`🔍 DEBUG: clients loaded: ${clients.length} · loans loaded: ${loans.length} · activeBranch: ${activeBranch||'ALL'} · loans missing client: ${missingClients.length}`
-      +(missingClients.length?'<br>Missing clientIds: '+missingClients.map(l=>`${l.id.slice(-6)} → clientId: "${l.clientId||'EMPTY'}"`).join(' | '):'');
-    if(!existingDebug) pg.prepend(debugEl);
-  }
   // END DEBUG
 
 // Auto-apply penalties sequentially (not parallel) to prevent race conditions
@@ -1613,6 +1602,10 @@ function renderDuePayments(){
   };
 
   pg.innerHTML=`
+    ${can('admin')?`<div style="background:rgba(59,130,246,0.1);border:1px solid var(--blue);border-radius:6px;padding:8px 14px;margin-bottom:12px;font-size:11px;color:var(--text2);font-family:monospace" id="_duePgDebug">
+      🔍 DEBUG: clients loaded: ${clients.length} · loans loaded: ${loans.length} · activeBranch: ${activeBranch||'ALL'} · loans missing client: ${loans.filter(l=>getLoanStatus(l)!=='completed'&&!clients.find(c=>c.id===l.clientId)).length}
+      ${loans.filter(l=>getLoanStatus(l)!=='completed'&&!clients.find(c=>c.id===l.clientId)).length?'<br>Missing: '+loans.filter(l=>getLoanStatus(l)!=='completed'&&!clients.find(c=>c.id===l.clientId)).map(l=>`loan ..${l.id.slice(-6)} → clientId: "${l.clientId||'EMPTY'}"`).join(' | '):''}
+    </div>`:''}
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap">
       <span style="font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Filter by frequency:</span>
       <select id="dueFreqFilter" onchange="renderDuePayments()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:5px 12px;font-size:12px;cursor:pointer">
