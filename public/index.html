@@ -1475,6 +1475,19 @@ function renderDuePayments(){
   const tzd=todayZW(), tzTomorrow=tomorrowZW();
   const freq=document.getElementById('dueFreqFilter')?.value||'';
 
+  // TEMPORARY DEBUG — remove after issue is identified
+  if(isSuperAdmin()){
+    const missingClients=loans.filter(l=>getLoanStatus(l)!=='completed'&&!clients.find(c=>c.id===l.clientId));
+    const existingDebug=document.getElementById('_duePgDebug');
+    const debugEl=existingDebug||document.createElement('div');
+    debugEl.id='_duePgDebug';
+    debugEl.style.cssText='background:rgba(59,130,246,0.1);border:1px solid var(--blue);border-radius:6px;padding:8px 14px;margin-bottom:12px;font-size:11px;color:var(--text2);font-family:monospace';
+    debugEl.innerHTML=`🔍 DEBUG: clients loaded: ${clients.length} · loans loaded: ${loans.length} · activeBranch: ${activeBranch||'ALL'} · loans missing client: ${missingClients.length}`
+      +(missingClients.length?'<br>Missing clientIds: '+missingClients.map(l=>`${l.id.slice(-6)} → clientId: "${l.clientId||'EMPTY'}"`).join(' | '):'');
+    if(!existingDebug) pg.prepend(debugEl);
+  }
+  // END DEBUG
+
 // Auto-apply penalties sequentially (not parallel) to prevent race conditions
   // Reset lock first — recursive call was removed so the lock can safely reset each render
   if(USE_DB && !window._penaltyAppliedThisSession){
