@@ -1476,7 +1476,7 @@ function renderDuePayments(){
   const freq=document.getElementById('dueFreqFilter')?.value||'';
 
   // TEMPORARY DEBUG — remove after issue is identified
-  if(isSuperAdmin()){
+  if(can('admin')){
     const missingClients=loans.filter(l=>getLoanStatus(l)!=='completed'&&!clients.find(c=>c.id===l.clientId));
     const existingDebug=document.getElementById('_duePgDebug');
     const debugEl=existingDebug||document.createElement('div');
