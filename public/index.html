@@ -3640,9 +3640,11 @@ async function generateMonthlyReport(){
   function $n(v){return typeof v==='number'?Math.round(v*100)/100:0;}
   function sv(ws,coord,val,type){
     const t=type||(typeof val==='number'?'n':'s');
-    if(!ws[coord])ws[coord]={t,v:val};
-    else{ws[coord].t=t;ws[coord].v=val;}
-    if(ws[coord].f)delete ws[coord].f; // remove formula so value shows
+    const existing=ws[coord];
+    const style=existing?.s; // preserve existing template style
+    ws[coord]={t,v:val};
+    if(style)ws[coord].s=style;
+    // never leave a formula — value must show directly
   }
 
   let userList=[];
@@ -3675,7 +3677,7 @@ async function generateMonthlyReport(){
   if(!window.XLSX){toast('SheetJS not loaded — hard refresh page','error');return;}
 
   // Load template — preserves all colours, borders, formatting
-  const wb=XLSX.read(_REPORT_TPL,{type:'base64'});
+  const wb=XLSX.read(_REPORT_TPL,{type:'base64',cellStyles:true});
 
   // ── GUIDE ─────────────────────────────────────────────────────
   const wsG=wb.Sheets['📋 Guide'];
@@ -3877,7 +3879,7 @@ async function generateMonthlyReport(){
 
   // Download
   const fname=`Credinova_Monthly_Report_${monthStr}${branchFilterId?'_'+branchLabel:''}.xlsx`;
-  XLSX.writeFile(wb,fname);
+  XLSX.writeFile(wb,fname,{cellStyles:true});
   if(statusEl)statusEl.innerHTML=`✅ Downloaded: ${fname} · ${activeLoans.length} active loans · ${fClients.length} clients`;
   addAudit('EXPORT','Report','monthly',`Monthly report — ${monthLabel} — ${branchLabel}`);
 }
