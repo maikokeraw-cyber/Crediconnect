@@ -154,7 +154,7 @@ const mapLoan = (r, totalPaid) => {
     computedStatus = paid >= totalOwed - 0.005 ? 'completed' : 'active';
   }
   return {
-    id: r.id, clientId: r.client_id, amount, interestRate: rate,
+    id: r.id, clientId: r.client_id, clientName: r.client_name||'', clientPhone: r.client_phone||'', amount, interestRate: rate,
     term: Number(r.term), termFrequency: r.term_frequency || 'monthly',
     startDate: r.start_date ? r.start_date.toISOString().slice(0,10) : '',
     purpose: r.purpose || '', notes: r.notes || '',
@@ -395,8 +395,11 @@ app.get('/api/loans', requireAuth, requireDB, async (req, res) => {
     // This ensures status is always correct regardless of what is stored
     const { rows } = await pool.query(`
       SELECT l.*,
-        COALESCE(p.total_paid, 0) AS total_paid
+        COALESCE(p.total_paid, 0) AS total_paid,
+        c.name AS client_name,
+        c.phone AS client_phone
       FROM loans l
+      LEFT JOIN clients c ON c.id = l.client_id
       LEFT JOIN (
         SELECT loan_id, SUM(amount) AS total_paid
         FROM repayments

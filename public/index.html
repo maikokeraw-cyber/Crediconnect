@@ -912,7 +912,7 @@ function uid(){ return Math.random().toString(36).slice(2,10)+Date.now().toStrin
 
 // ── Data normalisers — handle both camelCase (already mapped) and snake_case (raw DB rows)
 function normaliseClient(c){ return { id:c.id, name:c.name||'', phone:c.phone||'', phone2:c.phone2||c.phone_2||'', nationalId:c.nationalId||c.national_id||'', email:c.email||'', address:c.address||'', occupation:c.occupation||'', dob:(c.dob||'').slice(0,10), dateAdded:(c.dateAdded||c.date_added||'').slice(0,10), branchId:c.branchId||c.branch_id||'', addedBy:c.addedBy||c.added_by||'' }; }
-function normaliseLoan(l){ return { id:l.id, clientId:l.clientId||l.client_id||'', amount:Number(l.amount||0), interestRate:Number(l.interestRate||l.interest_rate||0), term:Number(l.term||0), termFrequency:l.termFrequency||l.term_frequency||'monthly', startDate:(l.startDate||l.start_date||'').slice(0,10), repaymentStartDate:(l.repaymentStartDate||l.repayment_start_date||'').slice(0,10), purpose:l.purpose||'', notes:l.notes||'', adminFees:Number(l.adminFees||l.admin_fees||0), adminFeesStatus:l.adminFeesStatus||l.admin_fees_status||'none', status:l.status||'active', addedBy:l.addedBy||l.added_by||'', branchId:l.branchId||l.branch_id||'' }; }
+function normaliseLoan(l){ return { id:l.id, clientId:l.clientId||l.client_id||'', clientName:l.clientName||l.client_name||'', clientPhone:l.clientPhone||l.client_phone||'', amount:Number(l.amount||0), interestRate:Number(l.interestRate||l.interest_rate||0), term:Number(l.term||0), termFrequency:l.termFrequency||l.term_frequency||'monthly', startDate:(l.startDate||l.start_date||'').slice(0,10), repaymentStartDate:(l.repaymentStartDate||l.repayment_start_date||'').slice(0,10), purpose:l.purpose||'', notes:l.notes||'', adminFees:Number(l.adminFees||l.admin_fees||0), adminFeesStatus:l.adminFeesStatus||l.admin_fees_status||'none', status:l.status||'active', addedBy:l.addedBy||l.added_by||'', branchId:l.branchId||l.branch_id||'' }; }
 function normaliseRepayment(r){ return { id:r.id, loanId:r.loanId||r.loan_id||'', clientId:r.clientId||r.client_id||'', amount:Number(r.amount||0), date:(r.date||'').slice(0,10), notes:r.notes||'', addedBy:r.addedBy||r.added_by||'' }; }
 function normaliseExpense(e){ return { id:e.id, amount:Number(e.amount||0), category:e.category||'', description:e.description||'', date:(e.date||'').slice(0,10), addedBy:e.addedBy||e.added_by||'', branchId:e.branchId||e.branch_id||'' }; }
 function today(){ return new Date().toISOString().slice(0,10); }
@@ -1436,7 +1436,7 @@ function _refreshOverdueTableBody(el, tzd){
     if(getLoanStatus(l)==='completed') return;
     if(freq && l.termFrequency!==freq) return;
     if(!isLoanOverdue(l)) return;
-    const c=clients.find(c=>c.id===l.clientId);
+    const c=clients.find(c=>c.id===l.clientId)||(l.clientName?{name:l.clientName,phone:l.clientPhone||""}:null);
     const amort=buildAmortisation(l);
     const bal=getLoanBalance(l.id);
     const lastDue=amort.filter(r=>r.dueDate<tzd).pop();
@@ -1521,7 +1521,7 @@ function renderDuePayments(){
     const status=getLoanStatus(l);
     if(status==='completed') return;
     if(freq && l.termFrequency!==freq) return;
-    const c=clients.find(c=>c.id===l.clientId);
+    const c=clients.find(c=>c.id===l.clientId)||(l.clientName?{name:l.clientName,phone:l.clientPhone||""}:null);
     const amort=buildAmortisation(l);
     const bal=getLoanBalance(l.id);
     const paid=getLoanPaid(l.id);
@@ -1603,8 +1603,8 @@ function renderDuePayments(){
 
   pg.innerHTML=`
     ${can('admin')?`<div style="background:rgba(59,130,246,0.1);border:1px solid var(--blue);border-radius:6px;padding:8px 14px;margin-bottom:12px;font-size:11px;color:var(--text2);font-family:monospace" id="_duePgDebug">
-      🔍 DEBUG: clients loaded: ${clients.length} · loans loaded: ${loans.length} · activeBranch: ${activeBranch||'ALL'} · loans missing client: ${loans.filter(l=>getLoanStatus(l)!=='completed'&&!clients.find(c=>c.id===l.clientId)).length}
-      ${loans.filter(l=>getLoanStatus(l)!=='completed'&&!clients.find(c=>c.id===l.clientId)).length?'<br>Missing: '+loans.filter(l=>getLoanStatus(l)!=='completed'&&!clients.find(c=>c.id===l.clientId)).map(l=>`loan ..${l.id.slice(-6)} → clientId: "${l.clientId||'EMPTY'}"`).join(' | '):''}
+      🔍 DEBUG: clients loaded: ${clients.length} · loans loaded: ${loans.length} · activeBranch: ${activeBranch||'ALL'} · loans missing client: ${loans.filter(l=>getLoanStatus(l)!=='completed'&&!clients.find(c=>c.id===l.clientId)||(l.clientName?{name:l.clientName,phone:l.clientPhone||""}:null)).length}
+      ${loans.filter(l=>getLoanStatus(l)!=='completed'&&!clients.find(c=>c.id===l.clientId)||(l.clientName?{name:l.clientName,phone:l.clientPhone||""}:null)).length?'<br>Missing: '+loans.filter(l=>getLoanStatus(l)!=='completed'&&!clients.find(c=>c.id===l.clientId)||(l.clientName?{name:l.clientName,phone:l.clientPhone||""}:null)).map(l=>`loan ..${l.id.slice(-6)} → clientId: "${l.clientId||'EMPTY'}"`).join(' | '):''}
     </div>`:''}
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap">
       <span style="font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Filter by frequency:</span>
@@ -1698,7 +1698,7 @@ async function renderLoanOfficerDashboard(){
 
   // Overdue loans enriched with client name
   const overdueRows=overdueLns.map(l=>{
-    const c=clients.find(c=>c.id===l.clientId);
+    const c=clients.find(c=>c.id===l.clientId)||(l.clientName?{name:l.clientName,phone:l.clientPhone||""}:null);
     const bal=getLoanBalance(l.id);
     const lastPay=[...repayments].filter(r=>r.loanId===l.id).sort((a,b)=>b.date.localeCompare(a.date))[0];
     return{l,c,bal,lastPay};
@@ -1810,7 +1810,7 @@ async function renderLoanOfficerDashboard(){
           <thead><tr><th>Client</th><th style="text-align:right;color:var(--gold2)">Amount</th><th>Date</th></tr></thead>
           <tbody>
             ${recentDis.length?recentDis.map(l=>{
-              const dc=clients.find(c=>c.id===l.clientId);
+              const dc=clients.find(c=>c.id===l.clientId)||(l.clientName?{name:l.clientName,phone:l.clientPhone||""}:null);
               return`<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openLoanDetail('${l.id}')">
                 <td style="padding:9px 14px;font-size:13px">${dc?dc.name:'—'}</td>
                 <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;color:var(--gold2);font-weight:600">$${fmt(l.amount)}</td>
@@ -2204,11 +2204,11 @@ async function saveEditClient(){
 // ================================================================
 function renderLoans(){
   const q=(document.getElementById('loanSearch')?.value||'').toLowerCase(),sf=document.getElementById('loanStatusFilter')?.value||'';
-  let data=loans.filter(l=>{const c=clients.find(c=>c.id===l.clientId);return(!q||((c?.name||'').toLowerCase().includes(q)||(l.purpose||'').toLowerCase().includes(q)))&&(!sf||(getLoanStatus(l)===sf||l.status===sf));});
+  let data=loans.filter(l=>{const c=clients.find(c=>c.id===l.clientId)||(l.clientName?{name:l.clientName,phone:l.clientPhone||""}:null);return(!q||((c?.name||'').toLowerCase().includes(q)||(l.purpose||'').toLowerCase().includes(q)))&&(!sf||(getLoanStatus(l)===sf||l.status===sf));});
   const cont=document.getElementById('loanCards');
   if(!data.length){cont.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="emoji">💰</div><p>No loans found</p></div>`;return;}
   cont.innerHTML=data.map(l=>{
-    const c=clients.find(c=>c.id===l.clientId),tot=getLoanTotal(l),bal=getLoanBalance(l.id),paid=tot-bal,pct=Math.min(100,Math.round(paid/tot*100));
+    const c=clients.find(c=>c.id===l.clientId)||(l.clientName?{name:l.clientName,phone:l.clientPhone||""}:null),tot=getLoanTotal(l),bal=getLoanBalance(l.id),paid=tot-bal,pct=Math.min(100,Math.round(paid/tot*100));
     const status=getLoanStatus(l);
     const lb=branches.find(b=>b.id===l.branchId);
     return `<div class="loan-card" onclick="openLoanDetail('${l.id}')">
@@ -2817,7 +2817,7 @@ async function saveEditRepayment(){
 function renderRepayments(){
   const q=(document.getElementById('repaySearch')?.value||'').toLowerCase(),lf=document.getElementById('repayLoanFilter')?.value||'';
   const sel=document.getElementById('repayLoanFilter'),cur=sel.value;
-  sel.innerHTML='<option value="">All Loans</option>'+loans.map(l=>{const c=clients.find(c=>c.id===l.clientId);return`<option value="${l.id}">${c?c.name:'?'} -- $${fmt(l.amount)} (${getLoanStatus(l)})</option>`;}).join('');
+  sel.innerHTML='<option value="">All Loans</option>'+loans.map(l=>{const c=clients.find(c=>c.id===l.clientId)||(l.clientName?{name:l.clientName,phone:l.clientPhone||""}:null);return`<option value="${l.id}">${c?c.name:'?'} -- $${fmt(l.amount)} (${getLoanStatus(l)})</option>`;}).join('');
   sel.value=cur;
   let data=repayments.filter(r=>{const lo=loans.find(l=>l.id===r.loanId),c=lo?clients.find(c=>c.id===lo.clientId):null;return(!q||((c?.name||'').toLowerCase().includes(q)))&&(!lf||r.loanId===lf);}).sort((a,b)=>b.date.localeCompare(a.date));
   const tp=data.reduce((s,r)=>s+r.amount,0);
@@ -2848,7 +2848,7 @@ function renderRepayments(){
 function openAddRepay(preselect){
   const al=loans.filter(l=>{ const s=getLoanStatus(l); return s==='active'||s==='defaulted'; }),sel=document.getElementById('fRL');
   sel.innerHTML='<option value="">-- Select Loan --</option>'+al.map(l=>{
-    const c=clients.find(c=>c.id===l.clientId);
+    const c=clients.find(c=>c.id===l.clientId)||(l.clientName?{name:l.clientName,phone:l.clientPhone||""}:null);
     const s=getLoanStatus(l);
     const tag=s==='defaulted'?' ⚠️ Defaulted':'';
     return`<option value="${l.id}">${c?c.name:'?'} - $${fmt(l.amount)}${tag}</option>`;
@@ -3221,7 +3221,7 @@ function renderReports(){
         ${par30Loans.length===0
           ? '<div style="text-align:center;padding:20px;color:var(--green)">✅ No loans are 30+ days overdue</div>'
           : par30Loans.map(l=>{
-              const c=clients.find(c=>c.id===l.clientId),bal=getLoanBalance(l.id),tot=getLoanTotal(l),pct=Math.round(bal/tot*100);
+              const c=clients.find(c=>c.id===l.clientId)||(l.clientName?{name:l.clientName,phone:l.clientPhone||""}:null),bal=getLoanBalance(l.id),tot=getLoanTotal(l),pct=Math.round(bal/tot*100);
               const amort=buildAmortisation(l);
               const worstDue=amort.filter(r=>Math.floor((todayD-new Date(r.dueDate+'T00:00:00'))/86400000)>=30).pop();
               const daysLate=worstDue?Math.floor((todayD-new Date(worstDue.dueDate+'T00:00:00'))/86400000):0;
@@ -3427,7 +3427,7 @@ async function renderAudit(){
   // Helper: resolve UUID-style loan ID to "ClientName — $amount"
   const loanDesc = (loanId) => {
     const l=loans.find(l=>l.id===loanId);
-    const c=l?clients.find(c=>c.id===l.clientId):null;
+    const c=l?clients.find(c=>c.id===l.clientId)||(l.clientName?{name:l.clientName,phone:l.clientPhone||""}:null):null;
     return c?`${c.name} — $${fmt(l.amount)}`:null;
   };
 
