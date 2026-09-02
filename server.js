@@ -1183,6 +1183,9 @@ app.get('/api/reports/monthly', requireAuth, requireDB, requireRole('admin','sup
     const AL=loanRows.rows, AC=clientRows.rows, AR=repRows.rows, AE=expRows.rows;
     const AAF=adminFeeRows.rows, AAPF=appFeeRows.rows, ABR=branchRows.rows, AU=userRows.rows;
 
+    // Convert raw pg Date objects → 'YYYY-MM-DD' strings safely
+    function toDS(d){ if(!d) return ''; if(d instanceof Date) return d.toISOString().slice(0,10); return String(d).slice(0,10); }
+
     function glTotal(l){ return Number(l.amount)*(1+Number(l.interest_rate)/100); }
     function glPaid(id){ return AR.filter(r=>r.loan_id===id).reduce((s,r)=>s+Number(r.amount),0); }
     function glBal(l){ return Math.max(0,glTotal(l)-glPaid(l.id)); }
@@ -1190,7 +1193,7 @@ app.get('/api/reports/monthly', requireAuth, requireDB, requireRole('admin','sup
     function buildAmort(l){
       const rows=[],tot=Number(l.amount),rate=Number(l.interest_rate),term=Number(l.term),freq=l.term_frequency||'monthly';
       const pp=tot/term,ip=tot*rate/100/term;
-      const start=new Date(((l.repayment_start_date||l.start_date)+'T00:00:00'));
+      const start=new Date((toDS(l.repayment_start_date)||toDS(l.start_date))+'T00:00:00');
       for(let i=1;i<=term;i++){
         const d=new Date(start);
         if(freq==='weekly')d.setDate(d.getDate()+i*7);
@@ -1215,7 +1218,7 @@ app.get('/api/reports/monthly', requireAuth, requireDB, requireRole('admin','sup
       return Math.floor((new Date()-new Date(ovd[ovd.length-1].dueDate+'T00:00:00'))/86400000);
     }
     function matDate(l){
-      const s=new Date(((l.repayment_start_date||l.start_date)+'T00:00:00'));
+      const s=new Date((toDS(l.repayment_start_date||'')||toDS(l.start_date))+'T00:00:00');
       const t=Number(l.term),f=l.term_frequency||'monthly';
       if(f==='weekly')s.setDate(s.getDate()+t*7);
       else if(f==='daily')s.setDate(s.getDate()+t);
@@ -1236,13 +1239,13 @@ app.get('/api/reports/monthly', requireAuth, requireDB, requireRole('admin','sup
     const overdueLoans=activeLoans.filter(l=>isOvd(l));
     const branchObj=effectiveBranch?ABR.find(b=>b.id===effectiveBranch):null;
     const branchLabel=branchObj?branchObj.name:'All Branches';
-    const mLoans=AL.filter(l=>(l.start_date||'').startsWith(month));
-    const mRep=AR.filter(r=>(r.date||'').startsWith(month));
-    const mExp=AE.filter(e=>(e.date||'').startsWith(month));
-    const mAF=AAF.filter(a=>(a.date||'').startsWith(month));
+    const mLoans=AL.filter(l=>toDS(l.start_date).startsWith(month));
+    const mRep=AR.filter(r=>toDS(r.date).startsWith(month));
+    const mExp=AE.filter(e=>toDS(e.date).startsWith(month));
+    const mAF=AAF.filter(a=>toDS(a.date).startsWith(month));
     const mFines=mAF.filter(a=>(a.notes||'').toLowerCase().includes('fine'));
     const mStd=mAF.filter(a=>!(a.notes||'').toLowerCase().includes('fine'));
-    const mApp=AAPF.filter(a=>(a.created_at||'').startsWith(month));
+    const mApp=AAPF.filter(a=>toDS(a.created_at).startsWith(month));
 
     const totalOut=$n(activeLoans.reduce((s,l)=>s+glBal(l),0));
     const stdFeesM=$n(mStd.reduce((s,a)=>s+Number(a.amount),0));
@@ -1252,11 +1255,11 @@ app.get('/api/reports/monthly', requireAuth, requireDB, requireRole('admin','sup
     const totalExpM=$n(mExp.reduce((s,e)=>s+Number(e.amount),0));
     const lastMD=new Date(year,mNum-2,1);
     const lastMS=lastMD.getFullYear()+'-'+String(lastMD.getMonth()+1).padStart(2,'0');
-    const lastInc=$n(AAF.filter(a=>(a.date||'').startsWith(lastMS)).reduce((s,a)=>s+Number(a.amount),0));
-    const lastExp=$n(AE.filter(e=>(e.date||'').startsWith(lastMS)).reduce((s,e)=>s+Number(e.amount),0));
+    const lastInc=$n(AAF.filter(a=>toDS(a.date).startsWith(lastMS)).reduce((s,a)=>s+Number(a.amount),0));
+    const lastExp=$n(AE.filter(e=>toDS(e.date).startsWith(lastMS)).reduce((s,e)=>s+Number(e.amount),0));
     const ytdStr=String(year)+'-';
-    const ytdInc=$n(AAF.filter(a=>(a.date||'').startsWith(ytdStr)).reduce((s,a)=>s+Number(a.amount),0));
-    const ytdExp=$n(AE.filter(e=>(e.date||'').startsWith(ytdStr)).reduce((s,e)=>s+Number(e.amount),0));
+    const ytdInc=$n(AAF.filter(a=>toDS(a.date).startsWith(ytdStr)).reduce((s,a)=>s+Number(a.amount),0));
+    const ytdExp=$n(AE.filter(e=>toDS(e.date).startsWith(ytdStr)).reduce((s,e)=>s+Number(e.amount),0));
     const par30=$n(overdueLoans.filter(l=>daysOvd(l)>30).reduce((s,l)=>s+glBal(l),0));
     const par90=$n(overdueLoans.filter(l=>daysOvd(l)>90).reduce((s,l)=>s+glBal(l),0));
     const par30pct=totalOut>0?((par30/totalOut)*100).toFixed(1)+'%':'0.0%';
@@ -1280,10 +1283,10 @@ app.get('/api/reports/monthly', requireAuth, requireDB, requireRole('admin','sup
       wsD.getCell('H6').value=par30pct; wsD.getCell('I6').value=par90pct; wsD.getCell('J6').value='0.0%';
       for(let i=0;i<12;i++){
         const ms=year+'-'+String(i+1).padStart(2,'0');
-        const ml=AL.filter(l=>(l.start_date||'').startsWith(ms));
-        const mr=AR.filter(r=>(r.date||'').startsWith(ms));
-        const maf2=AAF.filter(a=>(a.date||'').startsWith(ms));
-        const me2=AE.filter(e=>(e.date||'').startsWith(ms));
+        const ml=AL.filter(l=>toDS(l.start_date).startsWith(ms));
+        const mr=AR.filter(r=>toDS(r.date).startsWith(ms));
+        const maf2=AAF.filter(a=>toDS(a.date).startsWith(ms));
+        const me2=AE.filter(e=>toDS(e.date).startsWith(ms));
         const row=12+i;
         wsD.getCell(`C${row}`).value=$n(ml.reduce((s,l)=>s+Number(l.amount),0))||null;
         wsD.getCell(`D${row}`).value=$n(mr.reduce((s,r)=>s+Number(r.amount),0))||null;
@@ -1303,7 +1306,7 @@ app.get('/api/reports/monthly', requireAuth, requireDB, requireRole('admin','sup
         const r=6+i;
         wsLB.getCell(`A${r}`).value=shortL(l.id); wsLB.getCell(`B${r}`).value=shortC(l.client_id);
         wsLB.getCell(`C${r}`).value=c?.name||'—'; wsLB.getCell(`D${r}`).value=bname(l.branch_id);
-        wsLB.getCell(`E${r}`).value=oname(l.added_by); wsLB.getCell(`F${r}`).value=l.start_date;
+        wsLB.getCell(`E${r}`).value=oname(l.added_by); wsLB.getCell(`F${r}`).value=toDS(l.start_date);
         wsLB.getCell(`G${r}`).value=matDate(l); wsLB.getCell(`H${r}`).value=$n(Number(l.amount));
         wsLB.getCell(`I${r}`).value=l.interest_rate+'%';
         wsLB.getCell(`J${r}`).value=`${l.term} ${l.term_frequency||'monthly'}`;
@@ -1336,7 +1339,7 @@ app.get('/api/reports/monthly', requireAuth, requireDB, requireRole('admin','sup
         const l=AL.find(l=>l.id===r2.loan_id); const c=l?AC.find(c=>c.id===l.client_id):null; const r=5+i;
         wsCol.getCell(`A${r}`).value=i+1; wsCol.getCell(`B${r}`).value=l?shortL(l.id):'—';
         wsCol.getCell(`C${r}`).value=c?.name||'—'; wsCol.getCell(`D${r}`).value=l?bname(l.branch_id):'—';
-        wsCol.getCell(`E${r}`).value=r2.date; wsCol.getCell(`F${r}`).value=$n(Number(r2.amount));
+        wsCol.getCell(`E${r}`).value=toDS(r2.date); wsCol.getCell(`F${r}`).value=$n(Number(r2.amount));
       });
     }
 
@@ -1385,14 +1388,14 @@ app.get('/api/reports/monthly', requireAuth, requireDB, requireRole('admin','sup
         const brow=branchRowMap[b.name]; if(!brow) return;
         const bl=AL.filter(l=>l.branch_id===b.id),ba=bl.filter(l=>glStatus(l)!=='completed');
         const bOut=$n(ba.reduce((s,l)=>s+glBal(l),0));
-        const bDisb=$n(bl.filter(l=>(l.start_date||'').startsWith(month)).reduce((s,l)=>s+Number(l.amount),0));
-        const bColl=$n(AR.filter(r=>bl.find(l=>l.id===r.loan_id)&&(r.date||'').startsWith(month)).reduce((s,r)=>s+Number(r.amount),0));
-        const bNew=bl.filter(l=>(l.start_date||'').startsWith(month)).length;
+        const bDisb=$n(bl.filter(l=>toDS(l.start_date).startsWith(month)).reduce((s,l)=>s+Number(l.amount),0));
+        const bColl=$n(AR.filter(r=>bl.find(l=>l.id===r.loan_id)&&toDS(r.date).startsWith(month)).reduce((s,r)=>s+Number(r.amount),0));
+        const bNew=bl.filter(l=>toDS(l.start_date).startsWith(month)).length;
         const bCli=AC.filter(c=>c.branch_id===b.id).length;
         const bP30=ba.filter(l=>daysOvd(l)>30);
         const bPar=$n(bOut>0?bP30.reduce((s,l)=>s+glBal(l),0)/bOut*100:0);
-        const bExp=$n(AE.filter(e=>e.branch_id===b.id&&(e.date||'').startsWith(month)).reduce((s,e)=>s+Number(e.amount),0));
-        const bInc=$n(AAF.filter(a=>bl.find(l=>l.id===a.loan_id)&&(a.date||'').startsWith(month)).reduce((s,a)=>s+Number(a.amount),0));
+        const bExp=$n(AE.filter(e=>e.branch_id===b.id&&toDS(e.date).startsWith(month)).reduce((s,e)=>s+Number(e.amount),0));
+        const bInc=$n(AAF.filter(a=>bl.find(l=>l.id===a.loan_id)&&toDS(a.date).startsWith(month)).reduce((s,a)=>s+Number(a.amount),0));
         wsBr.getCell(`B${brow}`).value=bOut; wsBr.getCell(`C${brow}`).value=bDisb;
         wsBr.getCell(`D${brow}`).value=bColl; wsBr.getCell(`E${brow}`).value=bNew;
         wsBr.getCell(`F${brow}`).value=bCli; wsBr.getCell(`G${brow}`).value=bPar;
@@ -1409,10 +1412,10 @@ app.get('/api/reports/monthly', requireAuth, requireDB, requireRole('admin','sup
         const uA=uL.filter(l=>glStatus(l)!=='completed');
         const uPort=$n(uA.reduce((s,l)=>s+glBal(l),0));
         const uCli=AC.filter(c=>String(c.added_by)===String(u.id)).length;
-        const uNew=uL.filter(l=>(l.start_date||'').startsWith(month)).length;
+        const uNew=uL.filter(l=>toDS(l.start_date).startsWith(month)).length;
         let uDue=0;
         uA.forEach(l=>{buildAmort(l).filter(r=>r.dueDate.startsWith(month)).forEach(r=>{uDue+=r.principal+r.interest;});});
-        const uColl=$n(AR.filter(r=>uL.find(l=>l.id===r.loan_id)&&(r.date||'').startsWith(month)).reduce((s,r)=>s+Number(r.amount),0));
+        const uColl=$n(AR.filter(r=>uL.find(l=>l.id===r.loan_id)&&toDS(r.date).startsWith(month)).reduce((s,r)=>s+Number(r.amount),0));
         const uP30=uA.filter(l=>daysOvd(l)>30);
         const uPar=$n(uPort>0?uP30.reduce((s,l)=>s+glBal(l),0)/uPort*100:0);
         const r=5+i;
