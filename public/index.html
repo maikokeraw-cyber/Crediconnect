@@ -209,6 +209,7 @@ input::placeholder{color:var(--text3)}
 
 @media(max-width:1200px){.stats-grid{grid-template-columns:repeat(2,1fr)}}
 </style>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -3574,6 +3575,353 @@ function clearAudit(){if(!confirm('Clear all audit log entries?'))return;auditLo
 // ================================================================
 //  BACKUP — admin only
 // ================================================================
+// ================================================================
+//  MONTHLY REPORT GENERATOR (v5.2)
+// ================================================================
+async function generateMonthlyReport(){
+  const monthVal=document.getElementById('reportMonth')?.value;
+  if(!monthVal){toast('Please select a month','error');return;}
+  const statusEl=document.getElementById('reportGenStatus');
+  if(statusEl)statusEl.innerHTML='⏳ Generating report…';
+
+  const [year,month]=[parseInt(monthVal.slice(0,4)),parseInt(monthVal.slice(5,7))];
+  const monthName=new Date(year,month-1,1).toLocaleString('en',{month:'long'});
+  const monthLabel=`${monthName} ${year}`;
+  const monthStr=monthVal;
+
+  // Branch filter
+  const branchFilterId=document.getElementById('reportBranch')?.value||null;
+  const branchObj=branchFilterId?branches.find(b=>b.id===branchFilterId):null;
+  const branchLabel=branchObj?branchObj.name:'All Branches';
+  const inBranch=id=>!branchFilterId||id===branchFilterId;
+
+  // Filtered base data
+  const fLoans=loans.filter(l=>inBranch(l.branchId));
+  const fClients=clients.filter(c=>inBranch(c.branchId));
+  const fRepayments=repayments.filter(r=>{const l=fLoans.find(l=>l.id===r.loanId);return!!l;});
+  const fExpenses=expenses.filter(e=>inBranch(e.branchId));
+  const fAdminFees=adminFeePayments.filter(a=>{const l=fLoans.find(l=>l.id===a.loanId);return!!l&&!((a.notes||'').toLowerCase().includes('auto penalty'));});
+
+  // Month slices
+  const mLoans=fLoans.filter(l=>l.startDate.startsWith(monthStr));
+  const mRep=fRepayments.filter(r=>r.date.startsWith(monthStr));
+  const mExp=fExpenses.filter(e=>(e.date||'').startsWith(monthStr));
+  const mAF=fAdminFees.filter(a=>(a.date||'').startsWith(monthStr));
+  const mFines=mAF.filter(a=>(a.notes||'').toLowerCase().includes('fine'));
+  const mStdFees=mAF.filter(a=>!(a.notes||'').toLowerCase().includes('fine'));
+  const mAppFees=applicationFeePayments.filter(a=>(a.date||'').startsWith(monthStr)&&inBranch(a.branchId||null));
+
+  // Active / overdue
+  const activeLoans=fLoans.filter(l=>{const s=getLoanStatus(l);return s==='active'||s==='defaulted';});
+  const overdueLoans=activeLoans.filter(l=>isLoanOverdue(l));
+
+  // Helpers
+  function daysOvd(loan){
+    const amort=buildAmortisation(loan);
+    const todayStr=todayZW();
+    const ovd=amort.filter(r=>r.dueDate<todayStr);
+    if(!ovd.length)return 0;
+    const paid=getLoanPaid(loan.id);
+    const due=ovd.length*(getLoanTotal(loan)/loan.term);
+    if(paid>=due-0.005)return 0;
+    const d=new Date(ovd[ovd.length-1].dueDate+'T00:00:00');
+    return Math.floor((new Date()-d)/86400000);
+  }
+  function matDate(loan){
+    const s=new Date(((loan.repaymentStartDate||loan.startDate)+'T00:00:00'));
+    if(loan.termFrequency==='weekly') s.setDate(s.getDate()+loan.term*7);
+    else if(loan.termFrequency==='daily') s.setDate(s.getDate()+loan.term);
+    else s.setMonth(s.getMonth()+loan.term);
+    return s.toISOString().slice(0,10);
+  }
+  function nextPay(loan){
+    const amort=buildAmortisation(loan);
+    const t=todayZW();
+    const nx=amort.find(r=>r.dueDate>=t);
+    return nx?nx.dueDate:'';
+  }
+  function bname(id){return branches.find(b=>b.id===id)?.name||'—';}
+  function shortLoan(id){return 'CR-'+id.slice(0,8).toUpperCase();}
+  function shortClient(id){return 'CLT-'+id.slice(0,6).toUpperCase();}
+  function $n(v){return typeof v==='number'?Math.round(v*100)/100:0;}
+
+  // Fetch users for officer sheet
+  let userList=[];
+  try{if(USE_DB){const r=await apiFetch('GET','/api/users').catch(()=>[]);userList=Array.isArray(r)?r:[];}}catch(e){}
+  function oname(uid){const u=userList.find(u=>String(u.id)===String(uid));return u?(u.fullName||u.username):'—';}
+  function obranch(uid){const u=userList.find(u=>String(u.id)===String(uid));return u&&u.branchId?bname(u.branchId):'—';}
+
+  // Key metrics
+  const totalOutstanding=activeLoans.reduce((s,l)=>s+getLoanBalance(l.id),0);
+  const activeCount=activeLoans.length;
+  const avgLoanSize=activeCount?totalOutstanding/activeCount:0;
+  const totalDisbMonth=mLoans.reduce((s,l)=>s+l.amount,0);
+  const totalCollMonth=mRep.reduce((s,r)=>s+r.amount,0);
+  const par30loans=overdueLoans.filter(l=>daysOvd(l)>30);
+  const par90loans=overdueLoans.filter(l=>daysOvd(l)>90);
+  const par30pct=totalOutstanding>0?par30loans.reduce((s,l)=>s+getLoanBalance(l.id),0)/totalOutstanding:0;
+  const par90pct=totalOutstanding>0?par90loans.reduce((s,l)=>s+getLoanBalance(l.id),0)/totalOutstanding:0;
+
+  // P&L values
+  const thisIncome=mStdFees.reduce((s,a)=>s+a.amount,0)+mFines.reduce((s,a)=>s+a.amount,0)+mAppFees.reduce((s,a)=>s+a.amount,0);
+  const thisExp=mExp.reduce((s,e)=>s+e.amount,0);
+  const thisNet=thisIncome-thisExp;
+
+  const lastMD=new Date(year,month-2,1);
+  const lastMS=lastMD.getFullYear()+'-'+String(lastMD.getMonth()+1).padStart(2,'0');
+  const lastIncome=fAdminFees.filter(a=>(a.date||'').startsWith(lastMS)).reduce((s,a)=>s+a.amount,0);
+  const lastExp=fExpenses.filter(e=>(e.date||'').startsWith(lastMS)).reduce((s,e)=>s+e.amount,0);
+  const lastNet=lastIncome-lastExp;
+
+  const ytdIncome=fAdminFees.filter(a=>(a.date||'').startsWith(String(year)+'-')).reduce((s,a)=>s+a.amount,0);
+  const ytdExp=fExpenses.filter(e=>(e.date||'').startsWith(String(year)+'-')).reduce((s,e)=>s+e.amount,0);
+  const ytdNet=ytdIncome-ytdExp;
+
+  if(!window.XLSX){toast('SheetJS not loaded — hard refresh and try again','error');if(statusEl)statusEl.innerHTML='❌ SheetJS not loaded';return;}
+  const wb=XLSX.utils.book_new();
+
+  // ── GUIDE ────────────────────────────────────────────────────
+  const wsGuide=XLSX.utils.aoa_to_sheet([
+    ['','CREDINOVA FINANCIAL SOLUTIONS'],
+    ['','Microfinance Reporting Template  ·  Monthly Operations Report'],
+    [],
+    ['',`Branch: ${branchLabel}          Month: ${monthName}          Year: ${year}`],
+    [],
+    [],
+    ['','WHAT\'S IN THIS WORKBOOK'],
+    ['','📊 Dashboard','Executive KPIs — PAR, disbursements, collections, outstanding portfolio'],
+    ['','📋 Loan Book','Full list of all active loans with balances and status'],
+    ['','💰 Disbursements','Loans issued this month — client, amount, officer, branch'],
+    ['','✅ Collections','Repayments received — loan ID, amount, date, method'],
+    ['','⚠ Arrears','Overdue loans — days late, amount at risk, PAR calculation'],
+    ['','👤 Clients','Client registry — demographics, loan history, classification'],
+    ['','🏢 Branch Summary','Per-branch portfolio summary — income vs expenses'],
+    ['','👔 Officer Performance','Loan officer metrics — portfolio size, collections rate, new loans'],
+    ['','💹 P&L','Monthly income statement — interest income, fees, costs, net income'],
+    [],
+    ['','Generated by Credinova v5.2  ·  '+new Date().toLocaleDateString('en-GB')],
+  ]);
+  wsGuide['!cols']=[{wch:4},{wch:32},{wch:65}];
+  XLSX.utils.book_append_sheet(wb,wsGuide,'📋 Guide');
+
+  // ── DASHBOARD ────────────────────────────────────────────────
+  const trendRows=Array.from({length:12},(_,i)=>{
+    const ms=year+'-'+String(i+1).padStart(2,'0');
+    const mn=new Date(year,i,1).toLocaleString('en',{month:'short'});
+    const ml=fLoans.filter(l=>l.startDate.startsWith(ms));
+    const mr=fRepayments.filter(r=>r.date.startsWith(ms));
+    const maf=fAdminFees.filter(a=>(a.date||'').startsWith(ms));
+    const me=fExpenses.filter(e=>(e.date||'').startsWith(ms));
+    const disbursed=ml.reduce((s,l)=>s+l.amount,0);
+    const collected=mr.reduce((s,r)=>s+r.amount,0);
+    const net=maf.reduce((s,a)=>s+a.amount,0)-me.reduce((s,e)=>s+e.amount,0);
+    return ['',mn,disbursed||'',collected||'','',ml.length||'','','','',net||''];
+  });
+  const wsDash=XLSX.utils.aoa_to_sheet([
+    ['',`CREDINOVA  ·  MONTHLY DASHBOARD  —  ${monthLabel}`],
+    [],
+    ['','PORTFOLIO SNAPSHOT','','','','COLLECTIONS THIS MONTH','','RISK INDICATORS','',''],
+    ['','TOTAL OUTSTANDING ($)','ACTIVE LOANS (#)','AVG LOAN SIZE ($)','TOTAL CLIENTS','TOTAL DISBURSED ($)','TOTAL COLLECTED ($)','PAR > 30 DAYS','PAR > 90 DAYS','WRITE-OFF RATE'],
+    ['',$n(totalOutstanding),activeCount,$n(avgLoanSize),fClients.length,$n(totalDisbMonth),$n(totalCollMonth),(par30pct*100).toFixed(1)+'%',(par90pct*100).toFixed(1)+'%','0.0%'],
+    [],[],
+    ['',`MONTHLY TREND  —  ${year}`],
+    ['','Month','Disbursed ($)','Collected ($)','Outstanding ($)','New Loans','Closed Loans','PAR >30 (%)','Write-offs ($)','Net Income ($)'],
+    ...trendRows,
+  ]);
+  wsDash['!cols']=[{wch:4},{wch:22},{wch:15},{wch:15},{wch:15},{wch:16},{wch:16},{wch:14},{wch:14},{wch:15}];
+  XLSX.utils.book_append_sheet(wb,wsDash,'📊 Dashboard');
+
+  // ── LOAN BOOK ─────────────────────────────────────────────────
+  const lbRows=activeLoans.map(l=>{
+    const c=fClients.find(c=>c.id===l.clientId);
+    const days=daysOvd(l);
+    const status=days>90?'NPL (>90 days)':days>60?'At Risk (61-90 days)':days>30?'Watch (31-60 days)':days>0?'Watch (1-30 days)':'Active - Current';
+    return [shortLoan(l.id),shortClient(l.clientId),c?.name||'—',bname(l.branchId),oname(l.addedBy),l.startDate,matDate(l),$n(l.amount),l.interestRate+'%',`${l.term} ${l.termFrequency||'monthly'}`,$n(getLoanBalance(l.id)),$n(getLoanPaid(l.id)),nextPay(l),days||'',status];
+  });
+  const wsLB=XLSX.utils.aoa_to_sheet([
+    [`LOAN BOOK  —  All Active Loans  |  ${monthLabel}  |  ${branchLabel}`],
+    [],
+    ['Loan ID','Client ID','Client Name','Branch','Officer','Disbursement Date','Maturity Date','Principal ($)','Interest Rate','Loan Term','Outstanding ($)','Paid To Date ($)','Next Payment','Days Overdue','Status'],
+    ...lbRows,
+    [],
+    ['TOTALS','','','','','','',
+      $n(activeLoans.reduce((s,l)=>s+l.amount,0)),'','',
+      $n(activeLoans.reduce((s,l)=>s+getLoanBalance(l.id),0)),
+      $n(activeLoans.reduce((s,l)=>s+getLoanPaid(l.id),0)),'','',''],
+  ]);
+  wsLB['!cols']=[{wch:14},{wch:12},{wch:22},{wch:12},{wch:18},{wch:16},{wch:14},{wch:13},{wch:12},{wch:16},{wch:14},{wch:14},{wch:14},{wch:13},{wch:20}];
+  XLSX.utils.book_append_sheet(wb,wsLB,'📋 Loan Book');
+
+  // ── DISBURSEMENTS ─────────────────────────────────────────────
+  const wsDisb=XLSX.utils.aoa_to_sheet([
+    [`DISBURSEMENTS  —  Loans Issued in ${monthLabel}`],
+    [],
+    ['#','Loan ID','Client Name','Client ID','Branch','Loan Officer','Principal ($)','Interest Rate','Term','Purpose','Notes'],
+    ...mLoans.map((l,i)=>{
+      const c=fClients.find(c=>c.id===l.clientId);
+      return [i+1,shortLoan(l.id),c?.name||'—',shortClient(l.clientId),bname(l.branchId),oname(l.addedBy),$n(l.amount),l.interestRate+'%',`${l.term} ${l.termFrequency||'monthly'}`,l.purpose||'',l.notes||''];
+    }),
+    [],
+    ['MONTH TOTAL','','','','','',$n(mLoans.reduce((s,l)=>s+l.amount,0)),'','','',''],
+  ]);
+  wsDisb['!cols']=[{wch:4},{wch:14},{wch:22},{wch:12},{wch:12},{wch:18},{wch:13},{wch:12},{wch:16},{wch:18},{wch:22}];
+  XLSX.utils.book_append_sheet(wb,wsDisb,'💰 Disbursements');
+
+  // ── COLLECTIONS ───────────────────────────────────────────────
+  const wsCol=XLSX.utils.aoa_to_sheet([
+    [`COLLECTIONS  —  Repayments Received in ${monthLabel}`],
+    [],
+    ['#','Loan ID','Client Name','Branch','Payment Date','Amount Paid ($)','Principal ($)','Interest ($)','Fees ($)','Method'],
+    ...mRep.map((r,i)=>{
+      const l=fLoans.find(l=>l.id===r.loanId);
+      const c=l?fClients.find(c=>c.id===l.clientId):null;
+      return [i+1,l?shortLoan(l.id):'—',c?.name||'—',l?bname(l.branchId):'—',r.date,$n(r.amount),'','','',''];
+    }),
+    [],
+    ['TOTAL COLLECTIONS','','','','',$n(mRep.reduce((s,r)=>s+r.amount,0)),'','','',''],
+  ]);
+  wsCol['!cols']=[{wch:4},{wch:14},{wch:22},{wch:12},{wch:14},{wch:15},{wch:13},{wch:13},{wch:11},{wch:12}];
+  XLSX.utils.book_append_sheet(wb,wsCol,'✅ Collections');
+
+  // ── ARREARS ───────────────────────────────────────────────────
+  const arrDetail=overdueLoans.map(l=>{
+    const days=daysOvd(l);
+    const c=fClients.find(c=>c.id===l.clientId);
+    const bal=getLoanBalance(l.id);
+    const bucket=days>90?'>90 Days (NPL)':days>60?'61-90 Days':days>30?'31-60 Days':'1-30 Days';
+    return {l,c,days,bal,bucket};
+  }).sort((a,b)=>b.days-a.days);
+
+  const b1=arrDetail.filter(x=>x.days<=30),b2=arrDetail.filter(x=>x.days>30&&x.days<=60);
+  const b3=arrDetail.filter(x=>x.days>60&&x.days<=90),b4=arrDetail.filter(x=>x.days>90);
+  const bAmt=arr=>`${arr.length} loans / $${$n(arr.reduce((s,x)=>s+x.bal,0))}`;
+
+  const wsArr=XLSX.utils.aoa_to_sheet([
+    [`ARREARS REPORT  —  Portfolio At Risk  |  ${monthLabel}`],
+    [],
+    ['PAR SUMMARY','','1-30 Days','31-60 Days','61-90 Days','>90 Days (NPL)','','','',''],
+    ['Count / Amount:','',bAmt(b1),bAmt(b2),bAmt(b3),bAmt(b4),'','','',''],
+    [],
+    ['#','Loan ID','Client Name','Branch','Loan Officer','Outstanding ($)','Overdue Amount ($)','Days Overdue','Bucket','Action Taken'],
+    ...arrDetail.map((x,i)=>[i+1,shortLoan(x.l.id),x.c?.name||'—',bname(x.l.branchId),oname(x.l.addedBy),$n(x.bal),$n(x.bal),x.days,x.bucket,'']),
+    [],
+    ['TOTAL AT RISK','','','','',$n(arrDetail.reduce((s,x)=>s+x.bal,0)),$n(arrDetail.reduce((s,x)=>s+x.bal,0)),'','',''],
+  ]);
+  wsArr['!cols']=[{wch:4},{wch:14},{wch:22},{wch:12},{wch:18},{wch:15},{wch:17},{wch:13},{wch:16},{wch:20}];
+  XLSX.utils.book_append_sheet(wb,wsArr,'⚠ Arrears');
+
+  // ── CLIENTS ───────────────────────────────────────────────────
+  const wsCli=XLSX.utils.aoa_to_sheet([
+    [`CLIENT REGISTRY  |  ${monthLabel}  |  ${branchLabel}`],
+    [],
+    ['#','Client ID','Full Name','Gender','Age','Phone','Branch','Loan Officer','National ID','Total Loans','Active Loans','Classification'],
+    ...fClients.map((c,i)=>{
+      const cLoans=fLoans.filter(l=>l.clientId===c.id);
+      const cActive=cLoans.filter(l=>{const s=getLoanStatus(l);return s==='active'||s==='defaulted';});
+      return [i+1,shortClient(c.id),c.name,'','',c.phone,bname(c.branchId),oname(c.addedBy),c.nationalId||'',cLoans.length,cActive.length,cActive.length>0?'Active':'Completed'];
+    }),
+  ]);
+  wsCli['!cols']=[{wch:4},{wch:12},{wch:24},{wch:8},{wch:6},{wch:18},{wch:12},{wch:20},{wch:18},{wch:11},{wch:11},{wch:14}];
+  XLSX.utils.book_append_sheet(wb,wsCli,'👤 Clients');
+
+  // ── BRANCH SUMMARY ────────────────────────────────────────────
+  const activeBranches=branches.filter(b=>b.active!==false);
+  const branchRows=activeBranches.map(b=>{
+    const bl=fLoans.filter(l=>l.branchId===b.id);
+    const ba=bl.filter(l=>{const s=getLoanStatus(l);return s==='active'||s==='defaulted';});
+    const bOut=ba.reduce((s,l)=>s+getLoanBalance(l.id),0);
+    const bDisb=bl.filter(l=>l.startDate.startsWith(monthStr)).reduce((s,l)=>s+l.amount,0);
+    const bColl=fRepayments.filter(r=>{const l=bl.find(l=>l.id===r.loanId);return l&&r.date.startsWith(monthStr);}).reduce((s,r)=>s+r.amount,0);
+    const bNew=bl.filter(l=>l.startDate.startsWith(monthStr)).length;
+    const bClients=fClients.filter(c=>c.branchId===b.id).length;
+    const bP30=ba.filter(l=>daysOvd(l)>30);
+    const bPar30=bOut>0?((bP30.reduce((s,l)=>s+getLoanBalance(l.id),0)/bOut)*100).toFixed(1)+'%':'0.0%';
+    const bExp=fExpenses.filter(e=>e.branchId===b.id&&(e.date||'').startsWith(monthStr)).reduce((s,e)=>s+e.amount,0);
+    const bInc=fAdminFees.filter(a=>{const l=bl.find(l=>l.id===a.loanId);return l&&(a.date||'').startsWith(monthStr);}).reduce((s,a)=>s+a.amount,0);
+    return [b.name,$n(bOut),$n(bDisb),$n(bColl),bNew,bClients,bPar30,$n(bExp),$n(bInc-bExp)];
+  });
+  const wsBranch=XLSX.utils.aoa_to_sheet([
+    [`BRANCH PERFORMANCE SUMMARY  |  ${monthLabel}`],
+    [],
+    ['Branch','Outstanding ($)','Disbursed ($)','Collected ($)','New Loans (#)','Active Clients','PAR >30 (%)','Operating Cost ($)','Net Income ($)'],
+    ...branchRows,
+    ['TOTAL / WEIGHTED AVG',
+      $n(branchRows.reduce((s,r)=>s+(r[1]||0),0)),
+      $n(branchRows.reduce((s,r)=>s+(r[2]||0),0)),
+      $n(branchRows.reduce((s,r)=>s+(r[3]||0),0)),
+      branchRows.reduce((s,r)=>s+(r[4]||0),0),
+      branchRows.reduce((s,r)=>s+(r[5]||0),0),
+      '—',
+      $n(branchRows.reduce((s,r)=>s+(r[7]||0),0)),
+      $n(branchRows.reduce((s,r)=>s+(r[8]||0),0)),
+    ],
+  ]);
+  wsBranch['!cols']=[{wch:22},{wch:16},{wch:15},{wch:15},{wch:14},{wch:14},{wch:12},{wch:18},{wch:15}];
+  XLSX.utils.book_append_sheet(wb,wsBranch,'🏢 Branch Summary');
+
+  // ── OFFICER PERFORMANCE ───────────────────────────────────────
+  const officers=userList.filter(u=>u.role==='loan_officer'||u.role==='admin');
+  const wsOfficer=XLSX.utils.aoa_to_sheet([
+    [`LOAN OFFICER PERFORMANCE  |  ${monthLabel}`],
+    [],
+    ['Loan Officer','Branch','Portfolio ($)','Clients (#)','New Loans (#)','Amount Due ($)','Amount Collected ($)','Collection Rate (%)','PAR >30 (%)'],
+    ...officers.map(u=>{
+      const uLoans=fLoans.filter(l=>String(l.addedBy)===String(u.id));
+      const uActive=uLoans.filter(l=>{const s=getLoanStatus(l);return s==='active'||s==='defaulted';});
+      const uPort=uActive.reduce((s,l)=>s+getLoanBalance(l.id),0);
+      const uClients=fClients.filter(c=>String(c.addedBy)===String(u.id)).length;
+      const uNew=uLoans.filter(l=>l.startDate.startsWith(monthStr)).length;
+      let uDue=0;
+      uActive.forEach(l=>{buildAmortisation(l).filter(r=>r.dueDate.startsWith(monthStr)).forEach(r=>{uDue+=r.principal+r.interest;});});
+      const uColl=fRepayments.filter(r=>{const l=uLoans.find(l=>l.id===r.loanId);return l&&r.date.startsWith(monthStr);}).reduce((s,r)=>s+r.amount,0);
+      const collRate=uDue>0?((uColl/uDue)*100).toFixed(1)+'%':'—';
+      const uP30=uActive.filter(l=>daysOvd(l)>30);
+      const uPar=uPort>0?((uP30.reduce((s,l)=>s+getLoanBalance(l.id),0)/uPort)*100).toFixed(1)+'%':'0.0%';
+      return [u.fullName||u.username,obranch(u.id),$n(uPort),uClients,uNew,$n(uDue),$n(uColl),collRate,uPar];
+    }),
+  ]);
+  wsOfficer['!cols']=[{wch:22},{wch:12},{wch:14},{wch:11},{wch:13},{wch:15},{wch:17},{wch:17},{wch:12}];
+  XLSX.utils.book_append_sheet(wb,wsOfficer,'👔 Officer Performance');
+
+  // ── P&L ───────────────────────────────────────────────────────
+  const stdFeesThis=mStdFees.reduce((s,a)=>s+a.amount,0);
+  const finesThis=mFines.reduce((s,a)=>s+a.amount,0);
+  const appFeesThis=mAppFees.reduce((s,a)=>s+a.amount,0);
+  const wsPL=XLSX.utils.aoa_to_sheet([
+    [`MONTHLY PROFIT & LOSS  ·  CREDINOVA  |  ${monthLabel}`],
+    [],
+    ['ITEM','This Month ($)','Last Month ($)','YTD ($)'],
+    ['INCOME','','',''],
+    ['  Interest / Admin Fees',$n(stdFeesThis),$n(lastIncome),$n(ytdIncome)],
+    ['  Application Fees',$n(appFeesThis),'',''],
+    ['  Late Payment Fees (Fines)',$n(finesThis),'',''],
+    ['  Other Income','','',''],
+    ['TOTAL INCOME',$n(thisIncome),$n(lastIncome),$n(ytdIncome)],
+    ['COST OF FUNDS','','',''],
+    ['  Cost of Borrowing','','',''],
+    ['TOTAL COST OF FUNDS',0,0,0],
+    ['GROSS PROFIT',$n(thisIncome),$n(lastIncome),$n(ytdIncome)],
+    ['OPERATING EXPENSES','','',''],
+    ['  Staff Costs','','',''],
+    ['  Rent & Utilities','','',''],
+    ['  Transport','','',''],
+    ['  Loan Loss Provision','','',''],
+    ['  Marketing','','',''],
+    ['  Other Expenses',$n(thisExp),$n(lastExp),$n(ytdExp)],
+    ['TOTAL OPERATING EXPENSES',$n(thisExp),$n(lastExp),$n(ytdExp)],
+    ['NET INCOME',$n(thisNet),$n(lastNet),$n(ytdNet)],
+    ['NET MARGIN %',thisIncome>0?((thisNet/thisIncome)*100).toFixed(1)+'%':'—','—','—'],
+  ]);
+  wsPL['!cols']=[{wch:32},{wch:16},{wch:16},{wch:16}];
+  XLSX.utils.book_append_sheet(wb,wsPL,'💹 P&L');
+
+  // Download
+  const fname=`Credinova_Monthly_Report_${monthStr}${branchFilterId?'_'+branchLabel:''}.xlsx`;
+  XLSX.writeFile(wb,fname);
+  if(statusEl)statusEl.innerHTML=`✅ Downloaded: ${fname} · ${activeLoans.length} active loans · ${fClients.length} clients`;
+  addAudit('EXPORT','Report','monthly',`Monthly report generated — ${monthLabel} — ${branchLabel}`);
+}
+
 function renderBackup(){
   if(!can('admin')){document.getElementById('bakContent').innerHTML=permDenied('Backup is for Administrators only.');return;}
   const sz=JSON.stringify({clients,loans,repayments,expenses}).length;
@@ -3586,7 +3934,26 @@ function renderBackup(){
       <div style="margin-top:12px;font-size:12px;color:var(--text3)">Total storage used: <strong style="color:var(--text2)">${(sz/1024).toFixed(1)} KB</strong> of ~5,000 KB available</div>
     </div>
     <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:20px">
-      <h3 style="font-size:13px;font-weight:600;margin-bottom:14px">⬇ Export CSV Files</h3>
+      <h3 style="font-size:13px;font-weight:600;margin-bottom:4px">📊 Monthly Operations Report</h3>
+      <p style="font-size:12px;color:var(--text3);margin-bottom:14px">Generate a filled Excel report based on the Credinova monthly template — includes Loan Book, Disbursements, Collections, Arrears, Clients, Branch Summary, Officer Performance and P&L.</p>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+        <div>
+          <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px">Month</label>
+          <input type="month" id="reportMonth" value="${new Date().getFullYear()+'-'+String(new Date().getMonth()+1).padStart(2,'0')}" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:7px 12px;font-size:13px">
+        </div>
+        ${isSuperAdmin()?`<div>
+          <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px">Branch</label>
+          <select id="reportBranch" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:7px 12px;font-size:13px">
+            <option value="">All Branches</option>
+            ${branches.filter(b=>b.active!==false).map(b=>`<option value="${b.id}">${b.name}</option>`).join('')}
+          </select>
+        </div>`:''}
+        <button class="btn btn-primary" onclick="generateMonthlyReport()" style="display:flex;align-items:center;gap:6px">
+          📥 Generate &amp; Download
+        </button>
+      </div>
+      <div id="reportGenStatus" style="margin-top:10px;font-size:12px;color:var(--text3)"></div>
+    </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn btn-ghost" onclick="exportCSV('clients')">⬇ Clients.csv</button>
         <button class="btn btn-ghost" onclick="exportCSV('loans')">⬇ Loans.csv</button>
