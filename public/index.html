@@ -3110,7 +3110,7 @@ function renderFinancials(){
 function renderReports(){
   if(!can('admin')){document.getElementById('repContent').innerHTML=permDenied('Reports are for Administrators only.');return;}
   const td=loans.reduce((s,l)=>s+l.amount,0),ti=loans.reduce((s,l)=>s+(l.amount*l.interestRate/100),0);
-  const tc=repayments.reduce((s,r)=>s+r.amount,0),al=loans.filter(l=>getLoanStatus(l)==='active');
+  const tc=repayments.reduce((s,r)=>s+r.amount,0),al=loans.filter(l=>getLoanStatus(l)!=='completed');
   // Exclude auto-penalties from income — only count admin fees and manually collected fines
   const collectedFees=adminFeePayments.filter(a=>!(a.notes||'').toLowerCase().includes('auto penalty'));
   const pendingPenalties=adminFeePayments.filter(a=>(a.notes||'').toLowerCase().includes('auto penalty'));
