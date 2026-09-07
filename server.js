@@ -475,11 +475,45 @@ app.put('/api/loans/:id', requireAuth, requireDB, requireRole('admin','loan_offi
 });
 
 app.delete('/api/loans/:id', requireAuth, requireDB, requireRole('admin'), async (req, res) => {
+  const conn = await pool.connect();
   try {
-    await pool.query('DELETE FROM loans WHERE id=$1', [req.params.id]);
-    await audit(req.user.id, req.user.username, 'DELETE_LOAN', 'Loan', req.params.id, '');
+    const { password } = req.body || {};
+    if (!password) return res.status(400).json({ error: 'Password required to delete a loan' });
+
+    // Verify the acting user's own login password
+    const userRes = await conn.query('SELECT password_hash FROM users WHERE id=$1', [req.user.id]);
+    if (!userRes.rows[0] || !await bcrypt.compare(password, userRes.rows[0].password_hash)) {
+      return res.status(401).json({ error: 'Incorrect password' });
+    }
+
+    // Capture loan + client details BEFORE deletion for an accurate audit trail
+    const loanRes = await conn.query(
+      `SELECT l.*, c.name AS client_name FROM loans l LEFT JOIN clients c ON c.id=l.client_id WHERE l.id=$1`,
+      [req.params.id]
+    );
+    if (!loanRes.rows[0]) return res.status(404).json({ error: 'Loan not found' });
+    const loan = loanRes.rows[0];
+    const auditDetail = `${loan.client_name||'Unknown'} — $${Number(loan.amount).toFixed(2)} — started ${loan.start_date instanceof Date ? loan.start_date.toISOString().slice(0,10) : loan.start_date} — password-confirmed by ${req.user.username}`;
+
+    await conn.query('BEGIN');
+    // Delete dependents first (no reliance on DB cascade — mirrors safe manual cleanup)
+    await conn.query('DELETE FROM repayments WHERE loan_id=$1', [req.params.id]);
+    await conn.query('DELETE FROM admin_fee_payments WHERE loan_id=$1', [req.params.id]);
+    await conn.query(
+      `UPDATE mobile_loan_requests SET linked_loan_id=NULL, linked_client_id=NULL WHERE linked_loan_id=$1`,
+      [req.params.id]
+    );
+    await conn.query('DELETE FROM loans WHERE id=$1', [req.params.id]);
+    await conn.query('COMMIT');
+
+    await audit(req.user.id, req.user.username, 'DELETE_LOAN', 'Loan', req.params.id, auditDetail);
     res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    await conn.query('ROLLBACK').catch(()=>{});
+    res.status(500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
 });
 
 // ================================================================
