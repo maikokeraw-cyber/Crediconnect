@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Credinova v5.2 — Financial Solutions</title>
+<title>Credinova v5.3 — Financial Solutions</title>
 <!-- Fonts loaded non-blocking so slow network never hangs the app -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -245,7 +245,7 @@ input::placeholder{color:var(--text3)}
   </div>
   <div id="appLayout">
     <nav id="sidebar">
-      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v5.2</div></div>
+      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v5.3</div></div>
       <div class="nav">
         <div class="nav-section">Overview</div>
         <div class="nav-item active" id="nav-dashboard" onclick="navigate('dashboard')" class="nav-item-admin-only"><span class="icon">📊</span>Dashboard</div>
@@ -268,7 +268,7 @@ input::placeholder{color:var(--text3)}
         <div class="nav-item" id="nav-profile" onclick="navigate('profile')"><span class="icon">⚙️</span>My Profile</div>
       </div>
       <div style="padding:6px 14px 2px;text-align:right">
-        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:0.5px">v5.2</span>
+        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:0.5px">v5.3</span>
       </div>
       <div class="sidebar-user">
         <div class="sidebar-avatar" id="sbAvatar">?</div>
@@ -1019,7 +1019,7 @@ function updateStorageInfo(){
     ? `<span style="color:var(--green)">● Supabase PostgreSQL</span>`
     : `<span style="color:var(--amber)">● localStorage (offline)</span>`;
   const bLabel=isSuperAdmin()?(activeBranch?`Branch:${branches.find(b=>b.id===activeBranch)?.name||activeBranch.slice(-4)}`:'All'):(currentUser?.branchId?`Branch:${branches.find(b=>b.id===currentUser.branchId)?.name||'ID:'+currentUser.branchId.slice(-4)}`:'⚠️ No Branch');
-document.getElementById('storageInfo').innerHTML=`v5.2 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
+document.getElementById('storageInfo').innerHTML=`v5.3 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
 }
 
 // ================================================================
@@ -2915,14 +2915,14 @@ function updateRepayInfo(){
   const bal=getLoanBalance(id),periodic=getLoanTotal(loan)/loan.term;
   const isDefaulted=getLoanStatus(loan)==='defaulted';
   const pendingPenalties=getLoanPendingPenalties(id);
-  const suggested=Math.round((periodic+pendingPenalties)*100)/100;
+  const suggested=Math.round(periodic*100)/100; // Amount Paid = loan installment ONLY, never includes penalty
   // Show fine field only for defaulted loans
   const fw=document.getElementById('fRFineWrap');
   if(fw){ fw.style.display=isDefaulted?'':'none'; }
-  if(document.getElementById('fRFine')) document.getElementById('fRFine').value='';
+  if(document.getElementById('fRFine')) document.getElementById('fRFine').value=pendingPenalties>0?Math.round(pendingPenalties*100)/100:'';
   info.style.display='block';
   const penaltyLine=pendingPenalties>0
-    ?`<br><span style="color:var(--red);font-size:12px">⚠️ Outstanding penalty: <strong>$${fmt(pendingPenalties)}</strong> — included in suggested amount</span>`
+    ?`<br><span style="color:var(--red);font-size:12px">⚠️ Outstanding penalty: <strong>$${fmt(pendingPenalties)}</strong> — pre-filled in the Fine field below (edit if the client is paying a different amount)</span>`
     :'';
   info.innerHTML='<strong style="color:var(--text)">'+(c?.name||'')+'</strong> $'+fmt(loan.amount)+' @ '+loan.interestRate+'% &nbsp;·&nbsp; Balance: <strong style="color:var(--red)">$'+fmt(bal)+'</strong> &nbsp;·&nbsp; Suggested: <strong style="color:var(--green)">$'+fmt(suggested)+'</strong>'+(isDefaulted?'<br><span style="color:var(--amber)">⚠️ Defaulted — you can add a fine/penalty amount below</span>':'')+penaltyLine;
   document.getElementById('fRA').value=suggested;
