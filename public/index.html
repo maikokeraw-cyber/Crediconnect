@@ -628,7 +628,7 @@ function saveAll(){
 async function apiFetch(method, path, body) {
   const headers = { 'Content-Type': 'application/json' };
   if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
-  const res  = await fetch(API + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  const res  = await fetch(API + path, { method, headers, cache:'no-store', body: body ? JSON.stringify(body) : undefined });
   const data = await res.json();
   if (res.status === 401) { logout(true); throw new Error('Session expired'); }
   if (!res.ok) throw new Error(data.error || 'Request failed');

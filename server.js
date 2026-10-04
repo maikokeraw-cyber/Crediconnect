@@ -53,6 +53,16 @@ app.use(express.static(path.join(__dirname, 'public'), {
 // Apply general rate limit to all API routes
 app.use('/api', apiLimiter);
 
+// Never let the browser cache API responses — a cached /api/loans or
+// /api/repayments response can silently resurface minutes-old data
+// (seen on Safari/macOS) after a page looked correct on first load.
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
+
 // ── PostgreSQL Pool ──────────────────────────────────────────────
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -1186,6 +1196,126 @@ app.post('/api/cron/penalties', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ================================================================
+//  CRON — Daily payment reminder SMS (via eSMS Africa)
+//  Secured with CRON_SECRET env variable
+//  Env vars needed: ESMS_API_KEY, ESMS_SENDER_ID (optional, defaults to 'Credinova')
+// ================================================================
+function normalisePhone(phone){
+  let p = (phone||'').trim().replace(/[\s-]/g,'');
+  if(p.startsWith('0')) p = '+263'+p.slice(1); // local Zim format → E.164
+  if(!p.startsWith('+')) p = '+'+p;
+  return p;
+}
+
+async function sendSMS(phone, text){
+  if(!process.env.ESMS_API_KEY) throw new Error('ESMS_API_KEY not configured');
+  const to = normalisePhone(phone);
+  const resp = await fetch('https://sms.esmsafrica.io/api/messages/send', {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + process.env.ESMS_API_KEY,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      to,
+      text,
+      sender_id: process.env.ESMS_SENDER_ID || 'Credinova'
+    })
+  });
+  const data = await resp.json().catch(()=>({}));
+  if(!resp.ok) throw new Error(data.message || data.error || `SMS provider error (${resp.status})`);
+  return data;
+}
+
+app.post('/api/cron/reminders', async (req, res) => {
+  const secret = req.headers['x-cron-secret'] || req.query.secret;
+  if(!secret || secret !== process.env.CRON_SECRET){
+    return res.status(401).json({ error: 'Unauthorized — invalid cron secret' });
+  }
+  if(!dbConnected) return res.status(503).json({ error: 'DB not connected' });
+
+  // Zimbabwe UTC+2
+  const nowZW      = new Date(new Date().getTime() + 2*60*60*1000);
+  const todayStr    = nowZW.toISOString().slice(0,10);
+  const in3Days     = new Date(nowZW.getTime() + 3*24*60*60*1000).toISOString().slice(0,10);
+
+  let sent=0, skipped=0, errors=0;
+  const details=[];
+
+  try{
+    const { rows: loans } = await pool.query(`
+      SELECT l.*, c.name AS client_name, c.phone AS client_phone
+      FROM loans l
+      LEFT JOIN clients c ON c.id = l.client_id
+      WHERE l.status != 'completed'
+    `);
+
+    for(const loan of loans){
+      try{
+        if(!loan.client_phone){ skipped++; continue; }
+
+        const { rows: reps } = await pool.query(
+          `SELECT COALESCE(SUM(amount),0)::float AS total FROM repayments WHERE loan_id=$1`, [loan.id]
+        );
+        const totalPaid    = Number(reps[0].total);
+        const amort        = serverBuildAmortisation(loan);
+        const periodicPay  = amort[0]?.payment || 0;
+
+        // FIFO — find first period not yet covered by cumulative payments
+        const covered      = Math.floor((totalPaid / periodicPay) + 0.005);
+        const firstUnpaid  = amort[covered]; // undefined if fully paid ahead
+        if(!firstUnpaid){ skipped++; continue; }
+
+        let reminderType = null;
+        if(firstUnpaid.dueDate === todayStr) reminderType = 'due_today';
+        else if(firstUnpaid.dueDate === in3Days) reminderType = 'reminder_3day';
+        if(!reminderType){ skipped++; continue; }
+
+        // Already sent for this exact loan+period+type?
+        const { rows: already } = await pool.query(
+          `SELECT id FROM sms_log WHERE loan_id=$1 AND period_number=$2 AND reminder_type=$3`,
+          [loan.id, firstUnpaid.month, reminderType]
+        );
+        if(already.length){ skipped++; continue; }
+
+        const name   = loan.client_name || 'Customer';
+        const amt    = periodicPay.toFixed(2);
+        const dueFmt = new Date(firstUnpaid.dueDate+'T00:00:00').toLocaleDateString('en-GB',{day:'2-digit',month:'short'});
+        const text   = reminderType === 'due_today'
+          ? `Hi ${name}, your Credinova payment of $${amt} is due TODAY. Pay now to avoid a penalty. Thank you.`
+          : `Hi ${name}, your Credinova payment of $${amt} is due in 3 days (${dueFmt}). Please ensure funds are ready. Thank you.`;
+
+        const logId = uuidv4();
+        try{
+          await sendSMS(loan.client_phone, text);
+          await pool.query(
+            `INSERT INTO sms_log (id,loan_id,client_phone,period_number,reminder_type,status,sent_at)
+             VALUES ($1,$2,$3,$4,$5,'sent',NOW())`,
+            [logId, loan.id, loan.client_phone, firstUnpaid.month, reminderType]
+          );
+          sent++;
+          details.push({ client: name, type: reminderType, amount: amt, dueDate: firstUnpaid.dueDate });
+        }catch(smsErr){
+          await pool.query(
+            `INSERT INTO sms_log (id,loan_id,client_phone,period_number,reminder_type,status,provider_response,sent_at)
+             VALUES ($1,$2,$3,$4,$5,'failed',$6,NOW())`,
+            [logId, loan.id, loan.client_phone, firstUnpaid.month, reminderType, smsErr.message]
+          );
+          errors++;
+        }
+      }catch(e){ errors++; console.error('Reminder error loan', loan.id, e.message); }
+    }
+
+    console.log(`[CRON] ${todayStr} — Reminders sent:${sent} skipped:${skipped} errors:${errors}`);
+    res.json({ ok:true, date:todayStr, sent, skipped, errors, details });
+  }catch(err){
+    console.error('[CRON] reminders error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 
 // ================================================================
