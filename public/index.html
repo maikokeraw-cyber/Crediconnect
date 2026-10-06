@@ -646,10 +646,12 @@ async function checkServer() {
   } catch (e) { USE_DB = false; }
 }
 
+let _loadDataGeneration = 0; // bumped on every loadData() call — guards against out-of-order responses
 async function loadData() {
   if (!USE_DB || !authToken) return;
+  const myGen = ++_loadDataGeneration; // this call's ticket number
   try {
-    [clients, loans, repayments, expenses, adminFeePayments, branches, _appFeesRaw] = await Promise.all([
+    const [c, l, r, e, af, br, apf] = await Promise.all([
       apiFetch('GET', '/api/clients'+branchParam()),
       apiFetch('GET', '/api/loans'+branchParam()),
       apiFetch('GET', '/api/repayments'+branchParam()),
@@ -658,6 +660,10 @@ async function loadData() {
       apiFetch('GET', '/api/branches'),
       apiFetch('GET', '/api/application-fees'+branchParam()).catch(()=>[]),
     ]);
+    // A newer loadData() call has started since this one began — our results
+    // are now stale, so discard them silently instead of overwriting fresher data.
+    if (myGen !== _loadDataGeneration) return;
+    clients=c; loans=l; repayments=r; expenses=e; adminFeePayments=af; branches=br; const _appFeesRaw=apf;
     applicationFeePayments = _appFeesRaw.map(f=>({id:f.id,applicationId:f.applicationId,customerName:f.customerName||'',amount:Number(f.amount||0),date:(f.date||'').slice(0,10),notes:f.notes||'',addedBy:f.addedBy||'',createdAt:f.createdAt||''}));
     window._penaltyRunning = false;          // reset lock
     window._penaltyAppliedThisSession = false; // allow penalties to re-run after fresh data load
@@ -1048,7 +1054,7 @@ function navigate(page){
   // Refresh from DB on data pages so branch filter always applies
   const refreshPages = ['dashboard','clients','loans','duePayments','repayments','mobileApps','expenses','financials','reports'];
   if(USE_DB && refreshPages.includes(page)){
-    loadData().then(()=>{ if(fns[page]) fns[page](); });
+    loadData().then(()=>{ if(fns[page] && currentPage===page) fns[page](); });
   } else {
     if(fns[page]) fns[page]();
   }
