@@ -16,17 +16,17 @@ document.documentElement.setAttribute('data-theme',t);})();
 <style>
 :root {
   color-scheme:light;
-  --bg:#f2f4f9;--surface:#ffffff;--card:#ffffff;--card2:#eef1f8;
-  --border:#c9d1e2;--border2:#aab5cd;
-  --gold:#c9952a;--gold2:#a87a14;--gold-dim:rgba(201,149,42,0.14);
-  --text:#0b1220;--text2:#2f3d5c;--text3:#5b6a8a;
-  --green:#169c5c;--green-dim:rgba(22,156,92,0.12);
-  --red:#d63c3c;--red-dim:rgba(214,60,60,0.10);
-  --blue:#2f6fe0;--blue-dim:rgba(47,111,224,0.10);
-  --amber:#c27d0e;--amber-dim:rgba(194,125,14,0.12);
-  --purple:#8e3be0;--purple-dim:rgba(142,59,224,0.10);
-  --radius:12px;--radius-sm:8px;--shadow:0 4px 24px rgba(30,45,90,0.12);
-  --backdrop:rgba(20,30,55,.45);
+  --bg:#ffffff;--surface:#ffffff;--card:#ffffff;--card2:#f4f4f4;
+  --border:#d9d9d9;--border2:#bdbdbd;
+  --gold:#c4120c;--gold2:#b00d08;--gold-dim:rgba(196,18,12,0.08);
+  --text:#111111;--text2:#333333;--text3:#666666;
+  --green:#0d7a3f;--green-dim:rgba(13,122,63,0.10);
+  --red:#c62828;--red-dim:rgba(198,40,40,0.09);
+  --blue:#1a5fd0;--blue-dim:rgba(26,95,208,0.09);
+  --amber:#a35d00;--amber-dim:rgba(163,93,0,0.11);
+  --purple:#7b2fd0;--purple-dim:rgba(123,47,208,0.09);
+  --radius:12px;--radius-sm:8px;--shadow:0 2px 14px rgba(0,0,0,0.10);
+  --backdrop:rgba(0,0,0,.45);
 }
 :root[data-theme="dark"] {
   color-scheme:dark;
@@ -42,7 +42,13 @@ document.documentElement.setAttribute('data-theme',t);})();
   --shadow:0 4px 32px rgba(0,0,0,0.5);
   --backdrop:rgba(0,0,0,.75);
 }
-:root:not([data-theme="dark"]) body{font-weight:500}
+:root:not([data-theme="dark"]) body{font-weight:500;-webkit-font-smoothing:antialiased}
+:root:not([data-theme="dark"]) .btn-primary,:root:not([data-theme="dark"]) .login-btn{color:#fff}
+:root:not([data-theme="dark"]) .btn-primary:hover,:root:not([data-theme="dark"]) .login-btn:hover{background:#a30e09}
+:root:not([data-theme="dark"]) .page-title{font-family:'DM Sans',sans-serif;font-weight:700;letter-spacing:-.2px}
+:root:not([data-theme="dark"]) .nav-item.active{font-weight:700}
+:root:not([data-theme="dark"]) td{color:var(--text);font-weight:500}
+:root:not([data-theme="dark"]) th{color:var(--text);text-transform:uppercase}
 :root:not([data-theme="dark"]) th,:root:not([data-theme="dark"]) .nav-item,:root:not([data-theme="dark"]) label{font-weight:600}
 .theme-btn{background:var(--card2);border:1px solid var(--border);color:var(--text2);border-radius:20px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap}
 .theme-btn:hover{border-color:var(--gold);color:var(--text)}
