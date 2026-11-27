@@ -3,14 +3,33 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Credinova v5.3 — Financial Solutions</title>
+<title>Credinova v5.4 — Financial Solutions</title>
 <!-- Fonts loaded non-blocking so slow network never hangs the app -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+(function(){var t='light';try{var v=localStorage.getItem('credinova_theme');if(v==='dark'||v==='light')t=v;}catch(e){}
+document.documentElement.setAttribute('data-theme',t);})();
+</script>
 <style>
 :root {
+  color-scheme:light;
+  --bg:#f2f4f9;--surface:#ffffff;--card:#ffffff;--card2:#eef1f8;
+  --border:#c9d1e2;--border2:#aab5cd;
+  --gold:#c9952a;--gold2:#a87a14;--gold-dim:rgba(201,149,42,0.14);
+  --text:#0b1220;--text2:#2f3d5c;--text3:#5b6a8a;
+  --green:#169c5c;--green-dim:rgba(22,156,92,0.12);
+  --red:#d63c3c;--red-dim:rgba(214,60,60,0.10);
+  --blue:#2f6fe0;--blue-dim:rgba(47,111,224,0.10);
+  --amber:#c27d0e;--amber-dim:rgba(194,125,14,0.12);
+  --purple:#8e3be0;--purple-dim:rgba(142,59,224,0.10);
+  --radius:12px;--radius-sm:8px;--shadow:0 4px 24px rgba(30,45,90,0.12);
+  --backdrop:rgba(20,30,55,.45);
+}
+:root[data-theme="dark"] {
+  color-scheme:dark;
   --bg:#080d1a;--surface:#0f1624;--card:#141e30;--card2:#1a2540;
   --border:#243050;--border2:#2e3d60;
   --gold:#c9952a;--gold2:#e8b84b;--gold-dim:rgba(201,149,42,0.12);
@@ -20,8 +39,13 @@
   --blue:#4a8df5;--blue-dim:rgba(74,141,245,0.12);
   --amber:#f0a832;--amber-dim:rgba(240,168,50,0.12);
   --purple:#a855f7;--purple-dim:rgba(168,85,247,0.12);
-  --radius:12px;--radius-sm:8px;--shadow:0 4px 32px rgba(0,0,0,0.5);
+  --shadow:0 4px 32px rgba(0,0,0,0.5);
+  --backdrop:rgba(0,0,0,.75);
 }
+:root:not([data-theme="dark"]) body{font-weight:500}
+:root:not([data-theme="dark"]) th,:root:not([data-theme="dark"]) .nav-item,:root:not([data-theme="dark"]) label{font-weight:600}
+.theme-btn{background:var(--card2);border:1px solid var(--border);color:var(--text2);border-radius:20px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap}
+.theme-btn:hover{border-color:var(--gold);color:var(--text)}
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
 
@@ -142,7 +166,7 @@ tbody td.primary{color:var(--text);font-weight:500}
 select.search-input{cursor:pointer}
 
 /* ── MODAL ── */
-.modal-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:100;align-items:center;justify-content:center}
+.modal-backdrop{display:none;position:fixed;inset:0;background:var(--backdrop);z-index:100;align-items:center;justify-content:center}
 .modal-backdrop.open{display:flex}
 .modal{background:var(--card);border:1px solid var(--border2);border-radius:var(--radius);width:520px;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow);animation:modalIn .2s ease}
 .modal-wide{width:720px}
@@ -214,6 +238,7 @@ input::placeholder{color:var(--text3)}
 
 <!-- LOGIN -->
 <div id="loginScreen">
+  <button class="theme-btn" onclick="toggleTheme()" style="position:absolute;top:16px;right:16px">🌙 Dark</button>
   <div class="login-box">
     <div class="login-logo">
       <div class="login-logo-mark">Credinova</div>
@@ -245,7 +270,7 @@ input::placeholder{color:var(--text3)}
   </div>
   <div id="appLayout">
     <nav id="sidebar">
-      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v5.3</div></div>
+      <div class="logo"><div class="logo-mark">Credinova</div><div class="logo-sub">Financial Solutions · v5.4</div></div>
       <div class="nav">
         <div class="nav-section">Overview</div>
         <div class="nav-item active" id="nav-dashboard" onclick="navigate('dashboard')" class="nav-item-admin-only"><span class="icon">📊</span>Dashboard</div>
@@ -267,8 +292,9 @@ input::placeholder{color:var(--text3)}
         <div class="nav-section">Account</div>
         <div class="nav-item" id="nav-profile" onclick="navigate('profile')"><span class="icon">⚙️</span>My Profile</div>
       </div>
-      <div style="padding:6px 14px 2px;text-align:right">
-        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:0.5px">v5.3</span>
+      <div style="padding:6px 14px 2px;display:flex;align-items:center;justify-content:space-between">
+        <button class="theme-btn" onclick="toggleTheme()">🌙 Dark</button>
+        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;letter-spacing:0.5px">v5.4</span>
       </div>
       <div class="sidebar-user">
         <div class="sidebar-avatar" id="sbAvatar">?</div>
@@ -1025,7 +1051,7 @@ function updateStorageInfo(){
     ? `<span style="color:var(--green)">● Supabase PostgreSQL</span>`
     : `<span style="color:var(--amber)">● localStorage (offline)</span>`;
   const bLabel=isSuperAdmin()?(activeBranch?`Branch:${branches.find(b=>b.id===activeBranch)?.name||activeBranch.slice(-4)}`:'All'):(currentUser?.branchId?`Branch:${branches.find(b=>b.id===currentUser.branchId)?.name||'ID:'+currentUser.branchId.slice(-4)}`:'⚠️ No Branch');
-document.getElementById('storageInfo').innerHTML=`v5.3 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
+document.getElementById('storageInfo').innerHTML=`v5.4 · ${mode} · ${bLabel} &nbsp;·&nbsp; ${clients.length} clients · ${loans.length} loans · ${repayments.length} payments · ${expenses.length} expenses &nbsp;·&nbsp; ${(sz/1024).toFixed(1)} KB cached`;
 }
 
 // ================================================================
@@ -1033,6 +1059,19 @@ document.getElementById('storageInfo').innerHTML=`v5.3 · ${mode} · ${bLabel} &
 // ================================================================
 let charts={};
 let currentPage = 'dashboard';
+function cssv(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()}
+function applyTheme(t,save){
+  document.documentElement.setAttribute('data-theme',t);
+  if(save){try{localStorage.setItem('credinova_theme',t)}catch(e){}}
+  document.querySelectorAll('.theme-btn').forEach(b=>{b.textContent=t==='dark'?'☀️ Light':'🌙 Dark';b.title='Switch to '+(t==='dark'?'light':'dark')+' mode'});
+}
+function toggleTheme(){
+  const next=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';
+  applyTheme(next,true);
+  const app=document.getElementById('appWrapper');
+  if(app&&app.classList.contains('visible')&&typeof navigate==='function'){ try{navigate(currentPage)}catch(e){} }
+}
+document.addEventListener('DOMContentLoaded',()=>applyTheme(document.documentElement.getAttribute('data-theme')||'light',false));
 function navigate(page){
   currentPage = page;
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -1982,10 +2021,10 @@ function renderDashboard(){
   setTimeout(()=>{
     const st={active:0,completed:0,defaulted:0};loans.forEach(l=>{const s=getLoanStatus(l);st[s]=(st[s]||0)+1;});
     if(charts.p)charts.p.destroy();
-    charts.p=new Chart(document.getElementById('cPortfolio'),{type:'doughnut',data:{labels:['Active','Completed','Defaulted'],datasets:[{data:[st.active,st.completed,st.defaulted],backgroundColor:['#27c97a','#4a8df5','#e85454'],borderWidth:0,hoverOffset:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#8a9bc0',font:{size:12}}}}}});
+    charts.p=new Chart(document.getElementById('cPortfolio'),{type:'doughnut',data:{labels:['Active','Completed','Defaulted'],datasets:[{data:[st.active,st.completed,st.defaulted],backgroundColor:['#27c97a','#4a8df5','#e85454'],borderWidth:0,hoverOffset:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:cssv('--text2'),font:{size:12}}}}}});
     const ml=[],ma=[];for(let i=5;i>=0;i--){const d=new Date();d.setMonth(d.getMonth()-i);const ms=d.toISOString().slice(0,7);ml.push(d.toLocaleString('en',{month:'short'}));ma.push(repayments.filter(r=>r.date&&r.date.startsWith(ms)).reduce((s,r)=>s+r.amount,0));}
     if(charts.r)charts.r.destroy();
-    charts.r=new Chart(document.getElementById('cRepay'),{type:'bar',data:{labels:ml,datasets:[{label:'Collected ($)',data:ma,backgroundColor:'rgba(201,149,42,0.6)',borderColor:'#c9952a',borderWidth:1.5,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#8a9bc0'},grid:{color:'#243050'}},x:{ticks:{color:'#8a9bc0'},grid:{display:false}}}}});
+    charts.r=new Chart(document.getElementById('cRepay'),{type:'bar',data:{labels:ml,datasets:[{label:'Collected ($)',data:ma,backgroundColor:'rgba(201,149,42,0.6)',borderColor:'#c9952a',borderWidth:1.5,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:cssv('--text2')},grid:{color:cssv('--border')}},x:{ticks:{color:cssv('--text2')},grid:{display:false}}}}});
   },50);
 }
 
@@ -3151,7 +3190,7 @@ function renderFinancials(){
     </div>`;
   setTimeout(()=>{
     if(charts.cf)charts.cf.destroy();
-    charts.cf=new Chart(document.getElementById('cCashFlow'),{type:'bar',data:{labels:ml,datasets:[{label:'Income',data:mIn,backgroundColor:'rgba(39,201,122,0.7)',borderColor:'#27c97a',borderWidth:1.5,borderRadius:4},{label:'Expenses',data:mOut,backgroundColor:'rgba(232,84,84,0.7)',borderColor:'#e85454',borderWidth:1.5,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#8a9bc0'}}},scales:{y:{ticks:{color:'#8a9bc0'},grid:{color:'#243050'}},x:{ticks:{color:'#8a9bc0'},grid:{display:false}}}}});
+    charts.cf=new Chart(document.getElementById('cCashFlow'),{type:'bar',data:{labels:ml,datasets:[{label:'Income',data:mIn,backgroundColor:'rgba(39,201,122,0.7)',borderColor:'#27c97a',borderWidth:1.5,borderRadius:4},{label:'Expenses',data:mOut,backgroundColor:'rgba(232,84,84,0.7)',borderColor:'#e85454',borderWidth:1.5,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:cssv('--text2')}}},scales:{y:{ticks:{color:cssv('--text2')},grid:{color:cssv('--border')}},x:{ticks:{color:cssv('--text2')},grid:{display:false}}}}});
     if(catSorted.length&&document.getElementById('cExpCat')){if(charts.ec)charts.ec.destroy();charts.ec=new Chart(document.getElementById('cExpCat'),{type:'doughnut',data:{labels:catSorted.map(c=>c[0]),datasets:[{data:catSorted.map(c=>c[1]),backgroundColor:catSorted.map(c=>EXP_COLORS[c[0]]||'#8a9bc0'),borderWidth:0,hoverOffset:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},cutout:'65%'}});}
   },80);
 }
@@ -3292,11 +3331,11 @@ function renderReports(){
     </div>`;
   setTimeout(()=>{
     const st={active:0,completed:0,defaulted:0};loans.forEach(l=>{const s=getLoanStatus(l);st[s]=(st[s]||0)+1;});
-    if(charts.st)charts.st.destroy();charts.st=new Chart(document.getElementById('cStatus'),{type:'pie',data:{labels:['Active','Completed','Defaulted'],datasets:[{data:[st.active,st.completed,st.defaulted],backgroundColor:['#27c97a','#4a8df5','#e85454'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#8a9bc0'}}}}});
+    if(charts.st)charts.st.destroy();charts.st=new Chart(document.getElementById('cStatus'),{type:'pie',data:{labels:['Active','Completed','Defaulted'],datasets:[{data:[st.active,st.completed,st.defaulted],backgroundColor:['#27c97a','#4a8df5','#e85454'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:cssv('--text2')}}}}});
     const ml=[],col=[],exp=[];for(let i=5;i>=0;i--){const d=new Date();d.setMonth(d.getMonth()-i);const ms=d.toISOString().slice(0,7);ml.push(d.toLocaleString('en',{month:'short'}));col.push(repayments.filter(r=>r.date.startsWith(ms)).reduce((s,r)=>s+r.amount,0));exp.push(loans.reduce((s,l)=>s+getLoanTotal(l)/l.term,0));}
-    if(charts.co)charts.co.destroy();charts.co=new Chart(document.getElementById('cColl'),{type:'line',data:{labels:ml,datasets:[{label:'Collected',data:col,borderColor:'#27c97a',backgroundColor:'rgba(39,201,122,0.1)',tension:0.4,fill:true},{label:'Expected',data:exp,borderColor:'#4a8df5',backgroundColor:'transparent',tension:0.4,borderDash:[4,4]}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#8a9bc0'}}},scales:{y:{ticks:{color:'#8a9bc0'},grid:{color:'#243050'}},x:{ticks:{color:'#8a9bc0'},grid:{display:false}}}}});
+    if(charts.co)charts.co.destroy();charts.co=new Chart(document.getElementById('cColl'),{type:'line',data:{labels:ml,datasets:[{label:'Collected',data:col,borderColor:'#27c97a',backgroundColor:'rgba(39,201,122,0.1)',tension:0.4,fill:true},{label:'Expected',data:exp,borderColor:'#4a8df5',backgroundColor:'transparent',tension:0.4,borderDash:[4,4]}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:cssv('--text2')}}},scales:{y:{ticks:{color:cssv('--text2')},grid:{color:cssv('--border')}},x:{ticks:{color:cssv('--text2')},grid:{display:false}}}}});
     const bk={'<1K':0,'1K-5K':0,'5K-10K':0,'>10K':0};loans.forEach(l=>{if(l.amount<1000)bk['<1K']++;else if(l.amount<5000)bk['1K-5K']++;else if(l.amount<10000)bk['5K-10K']++;else bk['>10K']++;});
-    if(charts.di)charts.di.destroy();charts.di=new Chart(document.getElementById('cDist'),{type:'bar',data:{labels:Object.keys(bk),datasets:[{label:'Loans',data:Object.values(bk),backgroundColor:['#4a8df5','#27c97a','#c9952a','#e85454'],borderWidth:0,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#8a9bc0',stepSize:1},grid:{color:'#243050'}},x:{ticks:{color:'#8a9bc0'},grid:{display:false}}}}});
+    if(charts.di)charts.di.destroy();charts.di=new Chart(document.getElementById('cDist'),{type:'bar',data:{labels:Object.keys(bk),datasets:[{label:'Loans',data:Object.values(bk),backgroundColor:['#4a8df5','#27c97a','#c9952a','#e85454'],borderWidth:0,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:cssv('--text2'),stepSize:1},grid:{color:cssv('--border')}},x:{ticks:{color:cssv('--text2')},grid:{display:false}}}}});
   },50);
 }
 
